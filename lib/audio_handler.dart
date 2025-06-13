@@ -53,9 +53,51 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _listenForCurrentSongIndexChanges();
     _listenForSequenceStateChanges();
     _listenForProcessingStateChanges();
+    _listenForSettingsChanges();
     
     // Initialize the player with the playlist
     _initializePlayer();
+  }
+
+  void _listenForSettingsChanges() {
+    // Get settings instance
+    final settings = SettingsProvider();
+    
+    // Apply initial settings
+    _applySettings(settings);
+    
+    // Listen for volume changes from the player
+    _player.volumeStream.listen((volume) {
+      if (settings.volume != volume) {
+        settings.setVolume(volume);
+      }
+    });
+  }
+
+  Future<void> _applySettings(SettingsProvider settings) async {
+    try {
+      // Apply volume
+      await _player.setVolume(settings.volume);
+
+      // Apply volume normalization if supported
+      if (_player.audioNormalizationSupported) {
+        await _player.setAudioNormalization(settings.normalizeVolume);
+      }
+
+      // Apply equalizer if supported and enabled
+      if (_player.equalizerSupported && settings.equalizerEnabled) {
+        final bands = settings.currentPreset.bands;
+        for (var i = 0; i < bands.length; i++) {
+          await _player.setEqualizer(i, bands[i]);
+        }
+      } else if (_player.equalizerSupported) {
+        await _player.resetEqualizer();
+      }
+
+      _logger.info('Applied audio settings successfully');
+    } catch (e) {
+      _logger.severe('Error applying audio settings: $e');
+    }
   }
 
   // Connect player events to audio handler events
@@ -645,6 +687,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         final vid2 = mediaItem.extras?['videoId'] ?? _extractYouTubeVideoId(mediaItem.extras?['url'] as String? ?? mediaItem.id);
         return vid1 != null && vid1 == vid2;
       });
+
+      // Apply current settings before playing
+      await _applySettings(SettingsProvider());
+
       if (idx != -1) {
         await _player.seek(Duration.zero, index: idx);
         await _player.play();
@@ -655,6 +701,22 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     } catch (e, st) {
       _logger.severe('Error in playMediaItem: $e');
       _logger.severe(st);
+      // Notify the UI about the error
+      final error = e.toString();
+      if (error.contains('Permission denied') || error.contains('403')) {
+        throw PlaybackException('This song is not available for playback.');
+      } else if (error.contains('network')) {
+        throw PlaybackException('Network error. Please check your connection.');
+      } else {
+        throw PlaybackException('Unable to play this song. Please try again later.');
+      }
     }
   }
+
+class PlaybackException implements Exception {
+  final String message;
+  PlaybackException(this.message);
+  @override
+  String toString() => message;
+}
 } 

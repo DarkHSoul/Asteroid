@@ -3,6 +3,9 @@ import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 import 'package:asteroid/audio_handler.dart';
+import 'package:asteroid/screens/player_screen.dart';
+import 'package:asteroid/widgets/player/player_route.dart';
+import 'package:asteroid/utils/ui_utils.dart';
 
 class PlayerBar extends StatelessWidget {
   const PlayerBar({super.key});
@@ -25,11 +28,29 @@ class PlayerBar extends StatelessWidget {
             final currentIndex = queue.indexWhere((item) => item.id == current.id);
             final hasPrevious = currentIndex > 0;
             final hasNext = currentIndex >= 0 && currentIndex < queue.length - 1;
-            return GestureDetector(
-              onTap: () => Navigator.pushNamed(context, '/player'),
-              child: Container(
-                color: Theme.of(context).colorScheme.surface,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            return SafeArea(
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).push(
+                  PlayerRoute(child: const PlayerScreen()),
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
+                    border: Border(
+                      top: BorderSide(
+                        color: Theme.of(context).dividerColor,
+                        width: 0.5,
+                      ),
+                    ),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 child: Row(
                   children: [
                     if (current.artUri != null)
@@ -149,12 +170,26 @@ class _PlayerControls extends StatelessWidget {
             ),
             IconButton(
               icon: Icon(playing ? Icons.pause : Icons.play_arrow),
-              onPressed: playing ? audioHandler.pause : audioHandler.play,
+              onPressed: () async {
+                try {
+                  if (playing) {
+                    await audioHandler.pause();
+                  } else {
+                    await audioHandler.play();
+                  }
+                } catch (e) {
+                  UIUtils.showError(context, e.toString());
+                }
+              },
             ),
             IconButton(
               icon: const Icon(Icons.skip_next),
               onPressed: () async {
-                await audioHandler.skipToNext();
+                try {
+                  await audioHandler.skipToNext();
+                } catch (e) {
+                  UIUtils.showError(context, e.toString());
+                }
               },
             ),
           ],
