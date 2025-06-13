@@ -6,25 +6,42 @@ class SearchProvider extends ChangeNotifier {
   String _query = '';
   List<YoutubeMusicVideo> _results = [];
   bool _isLoading = false;
+  bool _isLoadingMore = false;
+  String? _continuationToken;
   final AudioCacheService _audioCacheService = AudioCacheService();
 
   String get query => _query;
   List<YoutubeMusicVideo> get results => _results;
   bool get isLoading => _isLoading;
+  bool get isLoadingMore => _isLoadingMore;
+  String? get continuationToken => _continuationToken;
 
   void setQuery(String value) {
     _query = value;
     notifyListeners();
   }
 
-  void setResults(List<YoutubeMusicVideo> value) {
+  void setResults(List<YoutubeMusicVideo> value, {String? continuation}) {
     _results = value;
+    _continuationToken = continuation;
     notifyListeners();
     _preloadAudioForResults(value);
   }
 
+  void appendResults(List<YoutubeMusicVideo> more, {String? continuation}) {
+    _results.addAll(more);
+    _continuationToken = continuation;
+    notifyListeners();
+    _preloadAudioForResults(more);
+  }
+
   void setLoading(bool value) {
     _isLoading = value;
+    notifyListeners();
+  }
+
+  void setLoadingMore(bool value) {
+    _isLoadingMore = value;
     notifyListeners();
   }
 

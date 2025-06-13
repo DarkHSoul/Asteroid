@@ -27,45 +27,85 @@ class YoutubeDLService {
       return _streamUrlCache[videoId];
     }
     try {
-      final manifest = await _yt.videos.streamsClient.getManifest(videoId);
-      // Get all audio-only streams, sorted by bitrate descending
-      final audioStreams = manifest.audioOnly.toList()
-        ..sort((a, b) => b.bitrate.compareTo(a.bitrate));
-      if (audioStreams.isEmpty) {
-        _logger.warning('No audio stream found for $videoId');
-        return null;
-      }
-      // Try each audio stream in order until one works
-      for (final stream in audioStreams) {
+      // Try the default client first, then fall back to alternative client profiles that often bypass 403 errors.
+      final List<List<YoutubeApiClient>> clientFallbacks = [
+        const [], // Default behaviour (TVHTML5 client)
+        [YoutubeApiClient.android],
+        [YoutubeApiClient.safari],
+      ];
+
+      for (final clients in clientFallbacks) {
         try {
-          // Filter for preferred codecs (opus/webm, m4a)
-          final mimeType = stream.codec.mimeType.toLowerCase();
-          final codecString = stream.codec.toString().toLowerCase();
-          if (!(mimeType.contains('audio') &&
-                (codecString.contains('opus') || codecString.contains('aac') || codecString.contains('mp4a')))) {
-            continue; // skip less preferred codecs
+          final manifest = clients.isEmpty
+              ? await _yt.videos.streamsClient.getManifest(videoId)
+              : await _yt.videos.streamsClient.getManifest(
+                  videoId,
+                  ytClients: clients,
+                );
+
+          // 1. Prefer HLS stream if available
+          final hlsStreams = manifest.hls;
+          if (hlsStreams.isNotEmpty) {
+            final url = hlsStreams.first.url.toString();
+            _cacheAndReturn(videoId, url);
+            _logger.info('Got HLS stream (client=${_clientNames(clients)})');
+            return url;
           }
-          final url = stream.url.toString();
-          // Optionally, do a HEAD request to check validity (skipped for speed)
-          // Cache and return
-          _streamUrlCache[videoId] = url;
-          // Maintain cache size
-          if (_streamUrlCache.length > _cacheSize) {
-            _streamUrlCache.remove(_streamUrlCache.keys.first);
+
+          // 2. Fallback to audio-only streams, sorted by bitrate descending
+          final audioStreams = manifest.audioOnly.toList()
+            ..sort((a, b) => b.bitrate.compareTo(a.bitrate));
+
+          for (final stream in audioStreams) {
+            final mimeType = stream.codec.mimeType.toLowerCase();
+            final codecString = stream.codec.toString().toLowerCase();
+            if (!(mimeType.contains('audio') &&
+                  (codecString.contains('opus') || codecString.contains('aac') || codecString.contains('mp4a')))) {
+              continue;
+            }
+            final url = stream.url.toString();
+            _cacheAndReturn(videoId, url);
+            _logger.info('Got audio stream (client=${_clientNames(clients)})');
+            return url;
           }
-          _logger.info('Got stream URL with youtube_explode_dart ($url)');
-          return url;
-        } catch (e) {
-          _logger.warning('Failed to use audio stream for $videoId: $e');
-          continue;
+
+          // If no streams usable, continue to next client profile.
+          _logger.fine('No usable streams with client=${_clientNames(clients)}');
+        } on YoutubeExplodeException catch (e) {
+          // Only break if the error is not a 403; otherwise try the next fallback.
+          if (!e.message.contains('403')) {
+            rethrow;
+          }
+          _logger.fine('Client ${_clientNames(clients)} returned 403, trying next fallback');
         }
       }
-      _logger.warning('No usable audio stream found for $videoId');
+
+      _logger.warning('All client fallbacks exhausted; no stream found for $videoId');
+      return null;
+    } on YoutubeExplodeException catch (e, stackTrace) {
+      _logger.severe('YoutubeExplodeException: $e');
+      _logger.severe('Stack trace: $stackTrace');
       return null;
     } catch (e, stackTrace) {
       _logger.severe('Error getting stream URL: $e');
       _logger.severe('Stack trace: $stackTrace');
       return null;
     }
+  }
+
+  // Helper that stores URL in cache and trims cache size
+  void _cacheAndReturn(String videoId, String url) {
+    _streamUrlCache[videoId] = url;
+    if (_streamUrlCache.length > _cacheSize) {
+      _streamUrlCache.remove(_streamUrlCache.keys.first);
+    }
+  }
+
+  // Helper to print nice client names for logs
+  String _clientNames(List<YoutubeApiClient> clients) {
+    if (clients.isEmpty) return 'default';
+    return clients
+        .map((c) => c.toString().split('.').last)
+        .join('+');
   }
 }

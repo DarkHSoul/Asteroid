@@ -29,8 +29,22 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // Keep track of whether we're currently processing a play request
   bool _processingPlayRequest = false;
   final _nextSongsController = StreamController<List<MediaItem>>.broadcast();
+  List<MediaItem> _latestSimilarSongs = [];
   Stream<List<MediaItem>> get nextSongsStream => _nextSongsController.stream;
+  List<MediaItem> get latestSimilarSongs => _latestSimilarSongs;
   final YouTubeService _youtubeService = YouTubeService();
+
+  // Add a position stream for real-time updates
+  Stream<Duration> get positionStream => _player.positionStream;
+
+  // Add state to track last similar fetch
+  String? _lastSimilarFetchVideoId;
+  bool _lastSimilarFetchWasEmpty = false;
+
+  MediaItem? _sessionFirstSong; // first track started this session
+  MediaItem? get sessionFirstSong => _sessionFirstSong;
+
+  bool _skipNextInProgress = false;
 
   MyAudioHandler() {
     print('MyAudioHandler initialized');
@@ -38,6 +52,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _listenForDurationChanges();
     _listenForCurrentSongIndexChanges();
     _listenForSequenceStateChanges();
+    _listenForProcessingStateChanges();
     
     // Initialize the player with the playlist
     _initializePlayer();
@@ -89,22 +104,11 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   // Listen to current song index changes
   void _listenForCurrentSongIndexChanges() {
-    _player.currentIndexStream.listen((index) async {
+    _player.currentIndexStream.listen((index) {
       final playlist = queue.value;
       if (index == null || playlist.isEmpty) return;
+      // Merely update the currently playing MediaItem – do NOT change the Up Next list.
       mediaItem.add(playlist[index]);
-      final current = playlist[index];
-      final videoId = current.extras?['videoId'] as String? ?? current.id;
-      print('Triggering fetchSimilarSongs for videoId: $videoId');
-      if (videoId != null && videoId.isNotEmpty) {
-        final similarVideos = await YouTubeMusicApi.fetchSimilarSongs(videoId);
-        final nextMediaItems = similarVideos.map((v) => _youtubeService.youtubeVideoToMediaItem(v)).toList();
-        _nextSongsController.add(nextMediaItems);
-        if (index == playlist.length - 1 && nextMediaItems.isNotEmpty) {
-          final newQueue = List<MediaItem>.from(playlist)..addAll(nextMediaItems);
-          await updateQueue(newQueue);
-        }
-      }
     });
   }
 
@@ -115,6 +119,15 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       if (sequence == null || sequence.isEmpty) return;
       final items = sequence.map((source) => source.tag as MediaItem).toList();
       queue.add(items);
+    });
+  }
+
+  // Automatically skip to the next track when the current one finishes
+  void _listenForProcessingStateChanges() {
+    _player.processingStateStream.listen((state) async {
+      if (state == ProcessingState.completed) {
+        await skipToNext();
+      }
     });
   }
 
@@ -129,12 +142,33 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   @override
-  Future<void> addQueueItem(MediaItem mediaItem) async {
+  Future<void> addQueueItem(MediaItem mediaItem, {bool prefetchSimilarSongs = true}) async {
     try {
       _logger.info('Adding queue item: ${mediaItem.title} - ${mediaItem.id}');
       
       // Get the URL from either id or extras
       String url = mediaItem.extras?['url'] as String? ?? mediaItem.id;
+      
+      // If the "url" looks like a bare YouTube videoId, resolve it to a stream URL first
+      if (url.length == 11 && !url.contains('/') && !url.contains('.')) {
+        _logger.info('Detected raw videoId ($url), resolving to stream URL');
+        final stream = await _youtubeService.getStreamingUrl(url);
+        if (stream != null) {
+          _logger.info('Resolved videoId to stream URL (${stream.substring(0, 50)}...)');
+          url = stream;
+          // Replace mediaItem so the queue stores the playable URL
+          mediaItem = mediaItem.copyWith(
+            id: stream,
+            extras: {
+              ...?mediaItem.extras,
+              'url': stream,
+              'videoId': mediaItem.extras?['videoId'] ?? url,
+            },
+          );
+        } else {
+          _logger.warning('Failed to resolve videoId=$url to stream URL');
+        }
+      }
       
       if (url.isEmpty) {
         _logger.severe('Empty URL for media item: ${mediaItem.title}');
@@ -188,6 +222,11 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       await _playlist.add(audioSource);
       _logger.info('Added to playlist successfully');
       
+      // If first item, remember as session first song
+      if (_sessionFirstSong == null) {
+        _sessionFirstSong = mediaItem;
+      }
+      
       // Add to queue
       final newQueue = queue.value..add(mediaItem);
       queue.add(newQueue);
@@ -198,6 +237,49 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         _logger.info('First item added, initializing player with playlist');
         await _player.setAudioSource(_playlist);
         _logger.info('Player initialized with playlist');
+      }
+      
+      // Prefetch similar songs immediately so Up Next is ready
+      if (prefetchSimilarSongs) {
+        try {
+          final videoId = mediaItem.extras?['videoId'] as String? ??
+              _extractYouTubeVideoId(mediaItem.extras?['url'] as String? ?? mediaItem.id);
+          if (videoId != null && videoId.isNotEmpty) {
+            final playlistId = mediaItem.extras?['playlistId'] as String?;
+            final params = mediaItem.extras?['params'] as String?;
+            // _logger.info('[NEXT API] (addQueueItem) Fetching similar songs for videoId: ' + videoId + ', playlistId: ' + (playlistId ?? 'null') + ', params: ' + (params ?? 'null'));
+            final similarVideos = await YouTubeMusicApi.fetchSimilarSongs(
+              videoId,
+              playlistId: playlistId,
+              params: params,
+            );
+            final nextMediaItems = similarVideos.map((v) => _youtubeService.youtubeVideoToMediaItem(v)).toList();
+            if (nextMediaItems.isNotEmpty) {
+              // Prepend the currently playing song to the similar songs list
+              final List<MediaItem> fullUpNextList = [mediaItem, ...nextMediaItems];
+              _latestSimilarSongs = fullUpNextList;
+              _nextSongsController.add(fullUpNextList);
+            } else {
+               // If no similar songs are found, the "Up Next" list should just contain the current song
+               final List<MediaItem> fullUpNextList = [mediaItem];
+               _latestSimilarSongs = fullUpNextList;
+               _nextSongsController.add(fullUpNextList);
+            }
+            // _logger.info('[NEXT API] (addQueueItem) Similar songs found: ' + nextMediaItems.length.toString());
+            for (final item in nextMediaItems) {
+              // _logger.info('[NEXT API] (addQueueItem)   - ' + item.title + ' (' + item.id + ')');
+            }
+            if (nextMediaItems.isNotEmpty) {
+              // Removed verbose console printing of similar songs
+              // debug print removed
+            }
+            // Cache fetch result to avoid duplicate network calls when the track starts playing
+            _lastSimilarFetchVideoId = videoId;
+            _lastSimilarFetchWasEmpty = nextMediaItems.isEmpty;
+          }
+        } catch (e) {
+          _logger.warning('Error prefetching similar songs: $e');
+        }
       }
       
     } catch (e, stackTrace) {
@@ -261,7 +343,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> seek(Duration position) async {
-    _player.seek(position);
+    await _player.pause();
+    await _player.seek(position);
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _player.play();
   }
 
   @override
@@ -272,24 +357,97 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> skipToNext() async {
-    final currentIndex = _player.currentIndex;
-    final playlist = queue.value;
-    if (currentIndex == null || playlist.isEmpty) return;
-    final current = playlist[currentIndex];
-    final videoId = current.extras?['videoId'] as String? ?? current.id;
-    if (videoId != null && videoId.isNotEmpty) {
-      final similarVideos = await YouTubeMusicApi.fetchSimilarSongs(videoId);
-      final nextMediaItems = similarVideos.map((v) => _youtubeService.youtubeVideoToMediaItem(v)).toList();
-      if (nextMediaItems.isNotEmpty) {
-        final newQueue = List<MediaItem>.from(playlist)..add(nextMediaItems.first);
-        await updateQueue(newQueue);
-        await _player.seek(Duration.zero, index: newQueue.length - 1);
-        _nextSongsController.add(nextMediaItems);
-        return;
+    if (_skipNextInProgress) return;
+    _skipNextInProgress = true;
+    try {
+      final playlist = queue.value;
+      if (playlist.isEmpty) return;
+
+      if (_player.hasNext) {
+        // Fast-path: play the next track already in the just_audio playlist
+        await _player.seekToNext();
+        // Calling play after seekToNext seems to be the pattern used elsewhere.
+        await _player.play();
+      } else if (_latestSimilarSongs.isNotEmpty) {
+        // Main playlist exhausted, add all similar songs to the main playlist
+        _logger.info('[NEXT API] Main playlist exhausted, adding all similar songs (${_latestSimilarSongs.length}) to main playlist.');
+
+        final songsToAdd = _latestSimilarSongs.toList(); // Create a copy
+        final firstAddedIndex = _playlist.length; // Index where new songs will start
+
+        _latestSimilarSongs = []; // Clear the similar list as it's being moved to the main queue
+        _nextSongsController.add([]); // Update the 'Up Next' stream to show it's empty
+
+        final audioSourcesToAdd = <AudioSource>[];
+        final processedItems = <MediaItem>[];
+        final youtubeDlService = YoutubeDLService();
+
+        for (final item in songsToAdd) {
+            String? videoId = item.extras?['videoId'] as String? ?? _extractYouTubeVideoId(item.extras?['url'] as String? ?? item.id);
+            String? streamUrl;
+
+            if (videoId != null) {
+                 try {
+                    // Get streaming URL for each similar song
+                    streamUrl = await youtubeDlService.getStreamUrl(videoId);
+                    if (streamUrl != null) {
+                        _logger.info('Got streaming URL using YT-DLP service for video: $videoId');
+                    }
+                } catch (e) {
+                    _logger.warning('Error using YT-DLP service for $videoId: $e');
+                    // If fetching fails, skip this song.
+                    continue;
+                }
+            } else {
+               // If it's not a YouTube video ID, assume the URL is already playable
+               streamUrl = item.extras?['url'] as String? ?? item.id;
+               if (streamUrl == null || streamUrl.isEmpty) {
+                   _logger.warning('Skipping item with no videoId or URL: ${item.title}');
+                   continue;
+               }
+               _logger.info('Using existing URL for non-YouTube item: ${item.title}');
+            }
+
+
+            if (streamUrl != null) {
+                 final newItem = item.copyWith(
+                    id: streamUrl, // Use streamUrl as the ID for playback
+                    extras: {
+                        ...?item.extras,
+                        'url': streamUrl,
+                        'videoId': videoId, // Keep the videoId if it exists
+                    },
+                );
+                processedItems.add(newItem);
+                audioSourcesToAdd.add(AudioSource.uri(Uri.parse(streamUrl), tag: newItem));
+            }
+        }
+
+        if (audioSourcesToAdd.isNotEmpty) {
+            await _playlist.addAll(audioSourcesToAdd); // Add to just_audio playlist
+
+            // Update the main queue stream with the newly added items
+            final newQueue = List<MediaItem>.from(queue.value)..addAll(processedItems);
+            queue.add(newQueue);
+
+            // Seek to the first newly added song and play
+            await _player.seek(Duration.zero, index: firstAddedIndex);
+            await _player.play();
+
+
+
+        } else {
+            _logger.info('[NEXT API] No valid songs found in similar list to add to main playlist.');
+             await _player.stop(); // If no valid songs to add, just stop
+        }
+
+      } else {
+        // No more items in main playlist or similar songs, just stop playback
+        _logger.info('[NEXT API] No more songs in main playlist or similar list, stopping.');
+        await _player.stop();
       }
-    }
-    if (_player.hasNext) {
-      await _player.seekToNext();
+    } finally {
+      _skipNextInProgress = false;
     }
   }
 
@@ -339,6 +497,59 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     await _player.dispose();
     await _nextSongsController.close();
     super.stop();
+  }
+
+  Future<void> clearAndPlay(MediaItem mediaItem, {bool resetSimilar = true}) async {
+    try {
+      _logger.info('clearAndPlay called');
+
+      if (resetSimilar) {
+        // Reset cached similar-songs information so a brand-new Up Next list is fetched for this track
+        _latestSimilarSongs = [];
+        _lastSimilarFetchVideoId = null;
+        _lastSimilarFetchWasEmpty = false;
+      }
+
+      // Ensure we have a playable URL
+      String? url = mediaItem.extras?['url'] as String? ?? mediaItem.id;
+      if (url.length == 11 && !url.contains('/') && !url.contains('.')) {
+        // looks like a YouTube videoId, resolve to stream url first
+        final stream = await _youtubeService.getStreamingUrl(url);
+        if (stream != null) {
+          mediaItem = mediaItem.copyWith(
+            id: stream,
+            extras: {
+              ...?mediaItem.extras,
+              'url': stream,
+            },
+          );
+          url = stream;
+        } else {
+          _logger.warning('Could not resolve streaming URL for videoId=$url');
+        }
+      }
+
+      await _player.stop();
+      await _playlist.clear();
+      queue.add([]);
+      // Reset player source – prefetch similar songs only when we reset the list.
+      await addQueueItem(mediaItem, prefetchSimilarSongs: resetSimilar);
+      await play();
+      // Log benzer şarkılar
+      final videoId = mediaItem.extras?['videoId'] as String? ?? _extractYouTubeVideoId(mediaItem.extras?['url'] as String? ?? mediaItem.id);
+      final playlistId = mediaItem.extras?['playlistId'] as String?;
+      final params = mediaItem.extras?['params'] as String?;
+      // _logger.info('[NEXT API] (clearAndPlay) Song started. videoId: ' + (videoId ?? 'null') + ', playlistId: ' + (playlistId ?? 'null') + ', params: ' + (params ?? 'null'));
+      // _logger.info('[NEXT API] (clearAndPlay) Latest similar songs: ' + _latestSimilarSongs.length.toString());
+      for (final item in _latestSimilarSongs) {
+        // _logger.info('[NEXT API] (clearAndPlay)   - ' + item.title + ' (' + item.id + ')');
+      }
+
+      // (If we cleared at the beginning, do NOT clear again here.)
+    } catch (e, st) {
+      _logger.severe('Error in clearAndPlay: $e');
+      _logger.severe(st);
+    }
   }
 
   // Extract YouTube video ID from various URL formats
@@ -424,6 +635,26 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       await _playlist.addAll(audioSources);
     } catch (e) {
       _logger.severe('Error updating queue: $e');
+    }
+  }
+
+  Future<void> playMediaItem(MediaItem mediaItem) async {
+    try {
+      final idx = queue.value.indexWhere((m) {
+        final vid1 = m.extras?['videoId'] ?? _extractYouTubeVideoId(m.extras?['url'] as String? ?? m.id);
+        final vid2 = mediaItem.extras?['videoId'] ?? _extractYouTubeVideoId(mediaItem.extras?['url'] as String? ?? mediaItem.id);
+        return vid1 != null && vid1 == vid2;
+      });
+      if (idx != -1) {
+        await _player.seek(Duration.zero, index: idx);
+        await _player.play();
+      } else {
+        // Replace current playback with the chosen media item but keep existing similar list.
+        await clearAndPlay(mediaItem, resetSimilar: false);
+      }
+    } catch (e, st) {
+      _logger.severe('Error in playMediaItem: $e');
+      _logger.severe(st);
     }
   }
 } 

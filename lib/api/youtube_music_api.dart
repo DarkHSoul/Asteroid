@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 class YoutubeMusicVideo {
   final String videoId;
@@ -11,6 +12,8 @@ class YoutubeMusicVideo {
   final String duration;
   final int? viewCount;
   String? trackingParams;
+  String? playlistId;
+  String? params;
 
   YoutubeMusicVideo({
     required this.videoId,
@@ -20,6 +23,8 @@ class YoutubeMusicVideo {
     required this.duration,
     this.viewCount,
     this.trackingParams,
+    this.playlistId,
+    this.params,
   });
 }
 
@@ -36,6 +41,27 @@ class YouTubeMusicApi {
   
   // API key for YouTube Music
   static const String _apiKey = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30';
+  
+  // Common headers for YouTube Music API requests
+  static const Map<String, String> _headers = {
+    'User-Agent': _userAgent,
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Content-Type': 'application/json',
+    'X-Goog-Api-Key': _apiKey,
+    'Origin': 'https://$_musicDomain',
+    'Referer': 'https://$_musicDomain/',
+    'X-Youtube-Client-Name': '67',
+    'X-Youtube-Client-Version': '1.20250602.03.00',
+    'X-Origin': 'https://$_musicDomain',
+  };
+  
+  // Store last continuation token from last fetch
+  static String? _lastContinuationToken;
+  static String? get lastContinuationToken => _lastContinuationToken;
+  
+  // Store last search continuation token
+  static String? _lastSearchContinuationToken;
+  static String? get lastSearchContinuationToken => _lastSearchContinuationToken;
   
   // Check network connectivity
   static Future<bool> isNetworkAvailable() async {
@@ -92,17 +118,7 @@ class YouTubeMusicApi {
       
       final response = await http.post(
         url,
-        headers: {
-          'User-Agent': _userAgent,
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': _apiKey,
-          'Origin': 'https://$_musicDomain',
-          'Referer': 'https://$_musicDomain/',
-          'X-Youtube-Client-Name': '67',
-          'X-Youtube-Client-Version': '1.20250602.03.00',
-          'X-Origin': 'https://$_musicDomain',
-        },
+        headers: _headers,
         body: json.encode(requestBody),
       ).timeout(const Duration(seconds: 15));
       
@@ -123,6 +139,24 @@ class YouTubeMusicApi {
             video.trackingParams = jsonResponse['trackingParams'];
           }
         }
+        
+        // Attempt to capture continuation token for further paging
+        try {
+          String? token;
+          // Look in first occurrence of continuations within section list
+          final tabbedResultsCont = jsonResponse['contents']?['tabbedSearchResultsRenderer']?['tabs'];
+          if (tabbedResultsCont is List) {
+            for (final tab in tabbedResultsCont) {
+              final cont = tab?['tabRenderer']?['content']?['sectionListRenderer']?['continuations']?[0]?
+                  ['nextContinuationData']?['token'];
+              if (cont != null && cont is String && cont.isNotEmpty) {
+                token = cont;
+                break;
+              }
+            }
+          }
+          _lastSearchContinuationToken = token;
+        } catch (_) {}
         
         return videos;
       } else {
@@ -206,16 +240,19 @@ class YouTubeMusicApi {
     try {
       // Extract video ID
       String videoId = '';
+      String? playlistId;
+      String? params;
       if (renderer['overlay'] != null &&
           renderer['overlay']['musicItemThumbnailOverlayRenderer'] != null &&
           renderer['overlay']['musicItemThumbnailOverlayRenderer']['content'] != null &&
           renderer['overlay']['musicItemThumbnailOverlayRenderer']['content']['musicPlayButtonRenderer'] != null) {
-        
         final playButtonRenderer = renderer['overlay']['musicItemThumbnailOverlayRenderer']['content']['musicPlayButtonRenderer'];
         if (playButtonRenderer['playNavigationEndpoint'] != null &&
             playButtonRenderer['playNavigationEndpoint']['watchEndpoint'] != null) {
-          
-          videoId = playButtonRenderer['playNavigationEndpoint']['watchEndpoint']['videoId'] ?? '';
+          final watchEndpoint = playButtonRenderer['playNavigationEndpoint']['watchEndpoint'];
+          videoId = watchEndpoint['videoId'] ?? '';
+          playlistId = watchEndpoint['playlistId'];
+          params = watchEndpoint['params'];
         }
       }
       
@@ -290,6 +327,8 @@ class YouTubeMusicApi {
         artist: artist,
         thumbnailUrl: thumbnailUrl,
         duration: duration,
+        playlistId: playlistId,
+        params: params,
       );
     } catch (e, stackTrace) {
       _logger.severe('Error extracting video from renderer: $e');
@@ -298,11 +337,174 @@ class YouTubeMusicApi {
     }
   }
 
-  static Future<List<YoutubeMusicVideo>> fetchSimilarSongs(String videoId) async {
-    print('fetchSimilarSongs called for videoId: $videoId');
+  static Future<List<YoutubeMusicVideo>> fetchSimilarSongs(
+    String videoId, {
+    String? playlistId,
+    String? params,
+    String language = 'en',
+    String region = 'US',
+    String tunerSettingValue = 'AUTOMIX_SETTING_NORMAL',
+    Map<String, dynamic>? loggingContext,
+    Map<String, dynamic>? watchEndpointMusicSupportedConfigs,
+    Map<String, dynamic>? responsiveSignals,
+    String queueContextParams = '',
+    Map<String, dynamic>? clickTracking,
+    Map<String, dynamic>? adSignalsInfo,
+  }) async {
+    // Always attempt live call first; fall back to bundled example for offline/dev
+    final List<YoutubeMusicVideo> relatedVideos = [];
     try {
-      final url = Uri.https(_musicDomain, '$_apiPath/next');
-      final requestBody = {
+      if (await isNetworkAvailable()) {
+        final url = Uri.https(_musicDomain, '$_apiPath/next', { 'key': _apiKey, 'prettyPrint': 'false' });
+        // Build request body
+        final body = {
+          'context': {
+            'client': {
+              'clientName': 'WEB_REMIX',
+              'clientVersion': '1.20250602.03.00',
+              'hl': language,
+              'gl': region,
+              'userAgent': _userAgent,
+              'clientFormFactor': 'UNKNOWN_FORM_FACTOR',
+              'platform': 'DESKTOP',
+            },
+            'request': { 'useSsl': true }
+          },
+          'videoId': videoId,
+          'isAudioOnly': true,
+        };
+        if (playlistId != null && playlistId.isNotEmpty) {
+          body['playlistId'] = playlistId;
+        } else {
+          body['playlistId'] = 'RDAMVM$videoId';
+        }
+        if (params != null && params.isNotEmpty) {
+          body['params'] = params;
+        }
+        // _logger.info('[NEXT API] Requesting similar songs for videoId=$videoId');
+        final response = await http
+            .post(url, headers: _headers, body: json.encode(body))
+            .timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          final jsonResponse = json.decode(response.body);
+          relatedVideos.addAll(_parseNextResponse(jsonResponse, videoId));
+        } else {
+          _logger.warning('[NEXT API] Non-200 response: ${response.statusCode}');
+        }
+      } else {
+        _logger.warning('[NEXT API] Network not available; using local example.json');
+      }
+    } catch (e, stack) {
+      _logger.warning('[NEXT API] Error during live fetch: $e');
+      _logger.fine(stack);
+    }
+
+    // Fallback to bundled example if live call failed or returned empty
+    if (relatedVideos.isEmpty) {
+      try {
+        final jsonStr = await rootBundle.loadString('assets/example.json');
+        final jsonResponse = json.decode(jsonStr);
+        relatedVideos.addAll(_parseNextResponse(jsonResponse, videoId));
+      } catch (e) {
+        _logger.severe('Error loading fallback example.json: $e');
+      }
+    }
+
+    return relatedVideos;
+  }
+
+  // Helper to parse /next or bundled example response
+  static List<YoutubeMusicVideo> _parseNextResponse(Map<String, dynamic> jsonResponse, String currentVideoId) {
+    final List<YoutubeMusicVideo> list = [];
+    try {
+      // extract token too
+      _lastContinuationToken = jsonResponse['contents']?['singleColumnMusicWatchNextResultsRenderer']?
+          ['tabbedRenderer']?['watchNextTabbedResultsRenderer']?['tabs']?[0]?['tabRenderer']?['content']?['musicQueueRenderer']?['content']?['playlistPanelRenderer']?['continuations']?[0]?['nextContinuationData']?['token'];
+      final contents = jsonResponse['contents']?['singleColumnMusicWatchNextResultsRenderer']?
+          ['tabbedRenderer']?['watchNextTabbedResultsRenderer']?['tabs']?[0]?['tabRenderer']?['content']?
+          ['musicQueueRenderer']?['content']?['playlistPanelRenderer']?['contents'] as List?;
+      if (contents == null) return list;
+      for (final item in contents) {
+        final videoRenderer = item['playlistPanelVideoRenderer'];
+        if (videoRenderer == null) continue;
+        final id = videoRenderer['videoId'] as String?;
+        if (id == null || id == currentVideoId) continue;
+        final title = videoRenderer['title']?['runs']?[0]?['text'] as String? ?? '';
+        // Artist / album / year in longBylineText.runs separated by " • " runs
+        String artist = '';
+        final bylineRuns = videoRenderer['longBylineText']?['runs'] as List?;
+        if (bylineRuns != null && bylineRuns.isNotEmpty) {
+          artist = bylineRuns.firstWhere(
+                  (r) => (r['text'] as String?)?.trim() != '•',
+                  orElse: () => {'text': ''})['text'] ?? '';
+        }
+        // Thumbnail
+        String thumbnailUrl = '';
+        final thumbList = videoRenderer['thumbnail']?['thumbnails'] as List?;
+        if (thumbList != null && thumbList.isNotEmpty) {
+          thumbnailUrl = thumbList.last['url'] ?? '';
+        }
+        // Duration
+        final duration = videoRenderer['lengthText']?['runs']?[0]?['text'] as String? ?? '';
+        // playlistId / params for chaining
+        String? plId;
+        String? prm;
+        final navEndpoint = videoRenderer['navigationEndpoint']?['watchEndpoint'];
+        if (navEndpoint != null) {
+          plId = navEndpoint['playlistId'] as String?;
+          prm = navEndpoint['params'] as String?;
+        }
+        list.add(YoutubeMusicVideo(
+          videoId: id,
+          title: title,
+          artist: artist,
+          thumbnailUrl: thumbnailUrl,
+          duration: duration,
+          playlistId: plId,
+          params: prm,
+        ));
+      }
+      // _logger.info('[NEXT API] Parsed \\${list.length} related videos');
+    } catch (e) {
+      _logger.warning('Error parsing next response: $e');
+    }
+    return list;
+  }
+
+  static Future<List<YoutubeMusicVideo>> fetchContinuation(String token) async {
+    final List<YoutubeMusicVideo> videos = [];
+    try {
+      final url = Uri.https(_musicDomain, '$_apiPath/next', {'key': _apiKey, 'prettyPrint': 'false'});
+      final body = {
+        'continuation': token,
+        'context': {
+          'client': {
+            'clientName': 'WEB_REMIX',
+            'clientVersion': '1.20250602.03.00',
+            'hl': 'en',
+            'gl': 'US'
+          }
+        }
+      };
+      final res = await http.post(url, headers: _headers, body: json.encode(body)).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) {
+        final jsonResp = json.decode(res.body);
+        videos.addAll(_parseNextResponse(jsonResp, ''));
+      }
+    } catch (e) {
+      _logger.warning('Error fetchContinuation: $e');
+    }
+    return videos;
+  }
+
+  // Fetch next page of search results using a continuation token
+  static Future<List<YoutubeMusicVideo>> searchContinuation(String token) async {
+    final List<YoutubeMusicVideo> videos = [];
+    try {
+      if (!await isNetworkAvailable()) return videos;
+
+      final url = Uri.https(_musicDomain, '$_apiPath$_searchEndpoint');
+      final body = {
         'context': {
           'client': {
             'clientName': 'WEB_REMIX',
@@ -311,120 +513,37 @@ class YouTubeMusicApi {
             'gl': 'US',
             'userAgent': _userAgent,
             'clientFormFactor': 'UNKNOWN_FORM_FACTOR',
-            'browserName': 'Chrome',
-            'browserVersion': '137.0.0.0',
-            'osName': 'Windows',
-            'osVersion': '10.0',
             'platform': 'DESKTOP',
-          },
-          'user': {
-            'lockedSafetyMode': false
-          },
-          'request': {
-            'useSsl': true,
-            'internalExperimentFlags': [],
-            'consistencyTokenJars': []
-          },
-        },
-        'videoId': videoId,
-      };
-      final response = await http.post(
-        url,
-        headers: {
-          'User-Agent': _userAgent,
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': _apiKey,
-          'Origin': 'https://$_musicDomain',
-          'Referer': 'https://$_musicDomain/',
-          'X-Youtube-Client-Name': '67',
-          'X-Youtube-Client-Version': '1.20250602.03.00',
-          'X-Origin': 'https://$_musicDomain',
-        },
-        body: json.encode(requestBody),
-      ).timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final jsonResponse = json.decode(response.body);
-        print('YouTube /next response keys: \\${jsonResponse.keys}');
-        // Try to find the related/queue section robustly
-        final List<YoutubeMusicVideo> relatedVideos = [];
-        // Print the structure for debugging
-        void printKeys(dynamic obj, [String prefix = '']) {
-          if (obj is Map) {
-            for (final k in obj.keys) {
-              print('$prefix$k');
-              printKeys(obj[k], '$prefix  ');
-            }
-          } else if (obj is List) {
-            for (int i = 0; i < obj.length; i++) {
-              printKeys(obj[i], '$prefix[$i]');
-            }
           }
-        }
-        print('--- YouTube /next response structure ---');
-        printKeys(jsonResponse);
-        print('--- End structure ---');
-        // Try to find the "Up next"/queue section
-        final contents = jsonResponse['contents'];
-        if (contents != null) {
-          // Try to find the musicQueueRenderer or playlistPanelRenderer
-          final queueCandidates = [
-            contents['singleColumnMusicWatchNextResultsRenderer']?['tabbedRenderer']?['watchNextTabbedResultsRenderer']?['tabs'],
-            contents['singleColumnMusicWatchNextResultsRenderer']?['sectionListRenderer']?['contents'],
-          ];
-          for (final candidate in queueCandidates) {
-            if (candidate is List) {
-              for (final tab in candidate) {
-                final tabRenderer = tab['tabRenderer'] ?? tab['musicQueueRenderer'] ?? tab['sectionListRenderer'];
-                if (tabRenderer != null) {
-                  // Try to find playlistPanelRenderer
-                  final sectionList = tabRenderer['content']?['sectionListRenderer'] ?? tabRenderer['sectionListRenderer'];
-                  if (sectionList != null && sectionList['contents'] != null) {
-                    final sections = sectionList['contents'] as List;
-                    for (final section in sections) {
-                      final musicQueue = section['musicQueueRenderer'];
-                      if (musicQueue != null && musicQueue['content'] != null) {
-                        final playlistPanel = musicQueue['content']['playlistPanelRenderer'];
-                        if (playlistPanel != null && playlistPanel['contents'] != null) {
-                          final queueItems = playlistPanel['contents'] as List;
-                          for (final item in queueItems) {
-                            final panelVideoRenderer = item['playlistPanelVideoRenderer'];
-                            if (panelVideoRenderer != null) {
-                              final videoId = panelVideoRenderer['videoId'] ?? '';
-                              final titleRuns = panelVideoRenderer['title']?['runs'] as List?;
-                              final title = (titleRuns != null && titleRuns.isNotEmpty) ? titleRuns[0]['text'] ?? '' : '';
-                              final artistRuns = panelVideoRenderer['longBylineText']?['runs'] as List?;
-                              final artist = (artistRuns != null && artistRuns.isNotEmpty) ? artistRuns[0]['text'] ?? '' : '';
-                              final thumbnailList = panelVideoRenderer['thumbnail']?['thumbnails'] as List?;
-                              final thumbnailUrl = (thumbnailList != null && thumbnailList.isNotEmpty) ? thumbnailList.last['url'] ?? '' : '';
-                              final lengthText = panelVideoRenderer['lengthText']?['simpleText'] ?? '';
-                              if (videoId.isNotEmpty && title.isNotEmpty) {
-                                relatedVideos.add(YoutubeMusicVideo(
-                                  videoId: videoId,
-                                  title: title,
-                                  artist: artist,
-                                  thumbnailUrl: thumbnailUrl,
-                                  duration: lengthText,
-                                ));
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
+        },
+        'continuation': token,
+      };
+
+      final res = await http.post(url, headers: _headers, body: json.encode(body)).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) {
+        final jsonResp = json.decode(res.body);
+        videos.addAll(_parseSearchResponse(jsonResp));
+
+        // Update continuation token for further paging
+        try {
+          String? nextToken;
+          final tabs = jsonResp['contents']?['tabbedSearchResultsRenderer']?['tabs'];
+          if (tabs is List) {
+            for (final tab in tabs) {
+              final cont = tab?['tabRenderer']?['content']?['sectionListRenderer']?['continuations']?[0]?
+                  ['nextContinuationData']?['token'];
+              if (cont != null && cont is String && cont.isNotEmpty) {
+                nextToken = cont;
+                break;
               }
             }
           }
-        }
-        print('Related videos parsed: \\${relatedVideos.length}');
-        return relatedVideos;
+          _lastSearchContinuationToken = nextToken;
+        } catch (_) {}
       }
-    } catch (e, stackTrace) {
-      print('Error fetching similar songs: \\${e.toString()}');
-      print('Stack trace: \\${stackTrace.toString()}');
+    } catch (e) {
+      _logger.warning('Error searchContinuation: $e');
     }
-    return [];
+    return videos;
   }
 } 

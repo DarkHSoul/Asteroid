@@ -37,15 +37,28 @@ class MiniPlayer extends StatelessWidget {
                 builder: (context, snapshot) {
                   final playbackState = snapshot.data;
                   final isPlaying = playbackState?.playing ?? false;
-                  return IconButton(
-                    icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
-                    onPressed: () {
-                      if (isPlaying) {
-                        audioHandler.pause();
-                      } else {
-                        audioHandler.play();
-                      }
-                    },
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.skip_previous),
+                        onPressed: () => audioHandler.skipToPrevious(),
+                      ),
+                      IconButton(
+                        icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+                        onPressed: () {
+                          if (isPlaying) {
+                            audioHandler.pause();
+                          } else {
+                            audioHandler.play();
+                          }
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.skip_next),
+                        onPressed: () => audioHandler.skipToNext(),
+                      ),
+                    ],
                   );
                 },
               ),

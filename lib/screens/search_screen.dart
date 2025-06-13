@@ -7,6 +7,7 @@ import 'package:asteroid/api/youtube_service.dart';
 import 'package:asteroid/api/youtube_music_api.dart';
 import 'package:asteroid/providers/search_provider.dart';
 import 'dart:math' as math;
+import 'package:asteroid/audio_handler.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -23,6 +24,7 @@ class _SearchScreenState extends State<SearchScreen> {
   String _currentlyPlayingVideoId = '';
   final _logger = Logger('SearchScreen');
   List<String> _searchHistory = [];
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -31,6 +33,7 @@ class _SearchScreenState extends State<SearchScreen> {
     _searchController = TextEditingController(text: searchProvider.query);
     _loadSearchHistory();
     _initYouTubeService();
+    _scrollController.addListener(_onScroll);
   }
   
   Future<void> _initYouTubeService() async {
@@ -72,6 +75,7 @@ class _SearchScreenState extends State<SearchScreen> {
   void dispose() {
     _searchController.dispose();
     _youtubeService.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -92,7 +96,7 @@ class _SearchScreenState extends State<SearchScreen> {
         throw Exception('No internet connection. Please check your network settings.');
       }
       final results = await _youtubeService.search(query);
-      searchProvider.setResults(results);
+      searchProvider.setResults(results, continuation: YouTubeMusicApi.lastSearchContinuationToken);
       if (results.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -113,6 +117,30 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final provider = Provider.of<SearchProvider>(context, listen: false);
+    if (provider.isLoadingMore || provider.continuationToken == null) return;
+    if (_scrollController.position.pixels > _scrollController.position.maxScrollExtent - 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    final provider = Provider.of<SearchProvider>(context, listen: false);
+    final token = provider.continuationToken;
+    if (token == null) return;
+    provider.setLoadingMore(true);
+    try {
+      final more = await _youtubeService.searchNext(token);
+      provider.appendResults(more, continuation: YouTubeMusicApi.lastSearchContinuationToken);
+    } catch (e) {
+      // ignore for now
+    } finally {
+      provider.setLoadingMore(false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final audioHandler = Provider.of<AudioHandler>(context);
@@ -124,6 +152,7 @@ class _SearchScreenState extends State<SearchScreen> {
     return Scaffold(
       resizeToAvoidBottomInset: false, // Prevents RenderFlex overflow when keyboard appears
       body: CustomScrollView(
+        controller: _scrollController,
         slivers: [
           SliverAppBar(
             floating: true,
@@ -272,6 +301,13 @@ class _SearchScreenState extends State<SearchScreen> {
             return SliverList(
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
+                  if (index == searchResults.length) {
+                    // loading indicator row
+                    return Provider.of<SearchProvider>(context, listen: false).isLoadingMore ? const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(child: CircularProgressIndicator()),
+                    ) : const SizedBox.shrink();
+                  }
                   final video = searchResults[index];
                   final bool isItemLoading = index == _loadingItemIndex;
                   final bool isCurrentlyPlaying = video.videoId == _currentlyPlayingVideoId;
@@ -318,65 +354,71 @@ class _SearchScreenState extends State<SearchScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    trailing: IconButton(
-                      icon: isCurrentlyPlaying
-                          ? Icon(isPlaying ? Icons.pause : Icons.play_arrow) // No color override
-                          : const Icon(Icons.play_arrow),
-                      onPressed: (isCurrentlyPlaying || !isItemLoading)
-                          ? () async {
-                              if (isCurrentlyPlaying) {
-                                if (isPlaying) {
-                                  await audioHandler.pause();
-                                } else {
-                                  await audioHandler.play();
-                                }
-                                return;
-                              }
-                              setState(() {
-                                _loadingItemIndex = index;
-                              });
-                              try {
-                                // Clear the queue first to avoid stacking
-                                final currentQueue = await audioHandler.queue.first;
-                                _logger.info('Current queue length: ︠currentQueue.length}');
-                                for (int i = 0; i < currentQueue.length; i++) {
-                                  await audioHandler.removeQueueItemAt(0);
-                                }
-                                _logger.info('Queue cleared');
-                                final mediaItem = _youtubeService.youtubeVideoToMediaItem(video);
-                                _logger.info('Created MediaItem: ︠mediaItem.id} - ︠mediaItem.title}');
-                                String? streamUrl;
+                    trailing: isItemLoading
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : IconButton(
+                            icon: isCurrentlyPlaying
+                                ? Icon(isPlaying ? Icons.pause : Icons.play_arrow)
+                                : const Icon(Icons.play_arrow),
+                            onPressed: (isCurrentlyPlaying || !isItemLoading)
+                           ? () async {
+                               if (isCurrentlyPlaying) {
+                                 if (isPlaying) {
+                                   await audioHandler.pause();
+                                 } else {
+                                   await audioHandler.play();
+                                 }
+                                 return;
+                               }
+                               setState(() {
+                                 _loadingItemIndex = index;
+                               });
+                               try {
+                                 final String? streamUrl = await _youtubeService.getStreamingUrl(video.videoId);
+                                 if (streamUrl == null) {
+                                   _logger.severe('Failed to get streaming URL for video ID: ${video.videoId}');
+                                   _youtubeService.printProcessedVideoIds();
+                                   setState(() {
+                                     _loadingItemIndex = -1;
+                                   });
+                                   ScaffoldMessenger.of(context).showSnackBar(
+                                     SnackBar(
+                                       content: Text('Cannot play this song: Unable to get streaming URL for ${video.title}. Video ID: ${video.videoId}'),
+                                       duration: const Duration(seconds: 5),
+                                     ),
+                                   );
+                                   return;
+                                 }
+                                 _logger.info('Got streaming URL (${streamUrl.length} chars): ${streamUrl.substring(0, math.min(100, streamUrl.length))}...');
+
+                                 final updatedMediaItem = _youtubeService.youtubeVideoToMediaItem(video).copyWith(
+                                   id: streamUrl,
+                                   extras: {
+                                     ...?_youtubeService.youtubeVideoToMediaItem(video).extras,
+                                     'url': streamUrl,
+                                   },
+                                 );
+
+                                 await (audioHandler as MyAudioHandler).clearAndPlay(updatedMediaItem);
+
+                                // Wait until playback actually starts before navigating / clearing loader
                                 try {
-                                  streamUrl = await _youtubeService.getStreamingUrl(video.videoId);
-                                } catch (e) {
-                                  _logger.warning('Error getting streaming URL: $e');
+                                  await audioHandler.playbackState.firstWhere((s) => s.playing);
+                                } catch (_) {}
+
+                                if (context.mounted) {
+                                  Navigator.of(context).pushNamed('/player');
                                 }
-                                if (streamUrl == null) {
-                                  _logger.warning('First attempt to get streaming URL failed, retrying...');
-                                  await Future.delayed(const Duration(milliseconds: 500));
-                                  try {
-                                    streamUrl = await _youtubeService.getStreamingUrl(video.videoId);
-                                  } catch (e) {
-                                    _logger.warning('Error on retry getting streaming URL: $e');
-                                  }
-                                }
-                                if (streamUrl == null) {
-                                  _logger.severe('Failed to get streaming URL for video ID: ${video.videoId}');
-                                  _youtubeService.printProcessedVideoIds();
-                                  setState(() {
-                                    _loadingItemIndex = -1;
-                                  });
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Cannot play this song: Unable to get streaming URL for ${video.title}. Video ID: ${video.videoId}'),
-                                      duration: const Duration(seconds: 5),
-                                    ),
-                                  );
-                                  return;
-                                }
-                                _logger.info('Got streaming URL (︠streamUrl.length} chars): ${streamUrl.substring(0, math.min(100, streamUrl.length))}...');
-                                await _continueWithPlayback(audioHandler, mediaItem, streamUrl, video);
-                                await Future.delayed(const Duration(milliseconds: 100));
+
+                                setState(() {
+                                  _loadingItemIndex = -1;
+                                  _currentlyPlayingVideoId = video.videoId;
+                                });
+                                _addToSearchHistory(video.title);
                               } catch (e) {
                                 _logger.severe('Error playing song: $e');
                                 setState(() {
@@ -391,52 +433,17 @@ class _SearchScreenState extends State<SearchScreen> {
                               }
                             }
                           : null,
-                    ),
+                          ),
                     onTap: null, // Disable ListTile tap
                   );
                 },
-                childCount: searchResults.length,
+                childCount: searchResults.length + 1,
               ),
             );
           },
         );
       },
     );
-  }
-
-  // Helper method to continue with playback after getting streaming URL
-  Future<void> _continueWithPlayback(
-    AudioHandler audioHandler,
-    MediaItem mediaItem,
-    String? streamUrl,
-    YoutubeMusicVideo video
-  ) async {
-    if (streamUrl == null) {
-      _logger.warning('Cannot continue playback with null streamUrl');
-      return;
-    }
-    
-    // Update the MediaItem with the streaming URL
-    final updatedMediaItem = mediaItem.copyWith(
-      id: streamUrl,
-      extras: {
-        ...?mediaItem.extras,
-        'url': streamUrl,
-      },
-    );
-    
-    // Add to queue and play
-    await audioHandler.addQueueItem(updatedMediaItem);
-    await audioHandler.play();
-    
-    // Update state
-    setState(() {
-      _loadingItemIndex = -1;
-      _currentlyPlayingVideoId = video.videoId;
-    });
-    
-    // Add to search history
-    _addToSearchHistory(video.title);
   }
 
   void _addToSearchHistory(String title) {

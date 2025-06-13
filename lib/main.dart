@@ -14,15 +14,8 @@ late AudioHandler _audioHandler;
 Future<void> main() async {
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
-    print('${record.level.name}: ${record.time}: ${record.message}');
-    if (record.error != null) {
-      print('ERROR: ${record.error}');
-    }
-    if (record.stackTrace != null) {
-      print(record.stackTrace);
-    }
+    print('${record.level.name}: ${record.time}: ${record.loggerName}: ${record.message}');
   });
-
   WidgetsFlutterBinding.ensureInitialized();
   _audioHandler = await initAudioService();
   runApp(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
+import 'package:asteroid/audio_handler.dart';
 
 class PlayerBar extends StatelessWidget {
   const PlayerBar({super.key});
@@ -9,6 +10,7 @@ class PlayerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final audioHandler = Provider.of<AudioHandler>(context);
+    final myAudioHandler = audioHandler as MyAudioHandler;
     return StreamBuilder<List<MediaItem>>(
       stream: audioHandler.queue,
       builder: (context, queueSnapshot) {
@@ -72,10 +74,10 @@ class PlayerBar extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                          StreamBuilder<PlaybackState>(
-                            stream: audioHandler.playbackState,
-                            builder: (context, stateSnap) {
-                              final pos = stateSnap.data?.position ?? Duration.zero;
+                          StreamBuilder<Duration>(
+                            stream: myAudioHandler.positionStream,
+                            builder: (context, posSnap) {
+                              final pos = posSnap.data ?? Duration.zero;
                               final total = current.duration ?? Duration.zero;
                               return LinearProgressIndicator(
                                 value: total.inMilliseconds > 0
@@ -151,14 +153,9 @@ class _PlayerControls extends StatelessWidget {
             ),
             IconButton(
               icon: const Icon(Icons.skip_next),
-              onPressed: hasNext
-                  ? () async {
-                      if (nextIndex != null) {
-                        await audioHandler.skipToQueueItem(nextIndex!);
-                        await audioHandler.play();
-                      }
-                    }
-                  : null,
+              onPressed: () async {
+                await audioHandler.skipToNext();
+              },
             ),
           ],
         );

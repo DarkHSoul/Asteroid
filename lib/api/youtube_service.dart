@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:asteroid/api/youtube_music_api.dart';
 import 'package:asteroid/api/youtube_dl_service.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:logging/logging.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:http/http.dart' as http;
 
 class YouTubeService {
   static final Logger _logger = Logger('YouTubeService');
@@ -103,11 +101,7 @@ class YouTubeService {
         _logger.warning('Error using YoutubeDLService: $e');
       }
       
-      // If YoutubeDLService fails, try direct Invidious API
-      if (url == null) {
-        _logger.info('YoutubeDLService failed, trying Invidious API directly');
-        url = await _getStreamUrlFromInvidious(videoId);
-      }
+      // No fallback to external APIs; rely solely on YT-DLP result.
       
       if (url == null) {
         _logger.warning('Could not get streaming URL for video ID: $videoId');
@@ -152,70 +146,6 @@ class YouTubeService {
     }
   }
 
-  // Get streaming URL directly from Invidious API
-  Future<String?> _getStreamUrlFromInvidious(String videoId) async {
-    // List of public Invidious instances to try
-    final invidousInstances = [
-      'vid.puffyan.us',
-      'invidious.snopyta.org',
-      'invidious.kavin.rocks',
-      'inv.riverside.rocks',
-      'yt.artemislena.eu',
-    ];
-    
-    // Try each Invidious instance
-    for (final instance in invidousInstances) {
-      try {
-        final url = Uri.parse('https://$instance/api/v1/videos/$videoId');
-        _logger.info('Trying Invidious API endpoint: $url');
-        
-        final response = await http.get(url).timeout(const Duration(seconds: 5));
-        if (response.statusCode == 200) {
-          _logger.info('Got response from Invidious API ($instance)');
-          
-          try {
-            final data = json.decode(response.body);
-            if (data['adaptiveFormats'] != null) {
-              final formats = data['adaptiveFormats'] as List;
-              _logger.info('Found ${formats.length} formats');
-              
-              // Find audio-only formats
-              final audioFormats = formats.where((f) => 
-                f['type']?.toString().contains('audio') == true
-              ).toList();
-              _logger.info('Found ${audioFormats.length} audio formats');
-              
-              if (audioFormats.isNotEmpty) {
-                // Sort by bitrate (highest first)
-                audioFormats.sort((a, b) => 
-                  (b['bitrate'] ?? 0).compareTo(a['bitrate'] ?? 0)
-                );
-                
-                // Get URL from best format
-                for (final format in audioFormats) {
-                  if (format['url'] != null) {
-                    final streamUrl = format['url'].toString();
-                    _logger.info('Got stream URL from Invidious API (${streamUrl.length} chars)');
-                    return streamUrl;
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            _logger.warning('Error parsing Invidious API response from $instance: $e');
-          }
-        } else {
-          _logger.warning('Invidious API request to $instance failed with status: ${response.statusCode}');
-        }
-      } catch (e) {
-        _logger.warning('Error with Invidious API request to $instance: $e');
-      }
-    }
-    
-    _logger.warning('All Invidious instances failed');
-    return null;
-  }
-
   // Print all processed video IDs
   void printProcessedVideoIds() {
     _logger.info('=== PROCESSED VIDEO IDs ===');
@@ -237,6 +167,8 @@ class YouTubeService {
         'url': video.videoId, // We store the video ID, not the URL
         'source': 'youtube_music',
         'videoId': video.videoId, // Always include the original videoId
+        if (video.playlistId != null) 'playlistId': video.playlistId,
+        if (video.params != null) 'params': video.params,
       },
     );
   }
@@ -275,5 +207,15 @@ class YouTubeService {
   // Dispose resources
   void dispose() {
     _connectivityController.close();
+  }
+
+  Future<List<YoutubeMusicVideo>> searchNext(String token) async {
+    try {
+      if (!await checkConnectivity()) return [];
+      return await YouTubeMusicApi.searchContinuation(token);
+    } catch (e) {
+      _logger.warning('Error searchNext: $e');
+      return [];
+    }
   }
 } 
