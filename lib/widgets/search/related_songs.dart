@@ -20,33 +20,35 @@ class RelatedSongs extends StatelessWidget {
 
         if (relatedSongs.isEmpty) {
           return const SizedBox.shrink();
-        }
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Related Songs',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
+        }        return ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 400), // Limit height to prevent overflow
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  'Related Songs',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-            ),
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: relatedSongs.length,
-              itemBuilder: (context, index) {
-                final song = relatedSongs[index];
-                return _RelatedSongTile(
-                  song: song,
-                  audioHandler: audioHandler,
-                );
-              },
-            ),
-          ],
+              Expanded(
+                child: ListView.builder(
+                  itemCount: relatedSongs.length,
+                  itemBuilder: (context, index) {
+                    final song = relatedSongs[index];
+                    return _RelatedSongTile(
+                      song: song,
+                      audioHandler: audioHandler,
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -74,7 +76,7 @@ class _RelatedSongTile extends StatelessWidget {
           leading: ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: Image.network(
-              song.thumbnail,
+              song.thumbnailUrl,
               width: 48,
               height: 48,
               fit: BoxFit.cover,
@@ -123,7 +125,7 @@ class _RelatedSongTile extends StatelessWidget {
                       id: song.videoId,
                       title: song.title,
                       artist: song.artist,
-                      artUri: Uri.parse(song.thumbnail),
+                      artUri: Uri.parse(song.thumbnailUrl),
                       extras: {
                         'url': song.videoId,
                         'duration': song.duration,
@@ -141,7 +143,7 @@ class _RelatedSongTile extends StatelessWidget {
                 id: song.videoId,
                 title: song.title,
                 artist: song.artist,
-                artUri: Uri.parse(song.thumbnail),
+                artUri: Uri.parse(song.thumbnailUrl),
                 extras: {
                   'url': song.videoId,
                   'duration': song.duration,

@@ -8,7 +8,6 @@ import 'package:asteroid/widgets/home/playlist_card.dart';
 import 'package:asteroid/widgets/home/genre_card.dart';
 import 'package:asteroid/screens/library_screen.dart';
 import 'package:asteroid/screens/search_screen.dart';
-import 'package:asteroid/screens/settings_screen.dart';
 import 'package:asteroid/widgets/player_bar.dart';
 import 'package:asteroid/widgets/app_drawer.dart';
 

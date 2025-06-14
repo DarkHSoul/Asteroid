@@ -50,76 +50,77 @@ class PlayerBar extends StatelessWidget {
                     ),
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
-                  children: [
-                    if (current.artUri != null)
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: Image.network(
-                          current.artUri.toString(),
-                          width: 48,
-                          height: 48,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => Container(
+                  child: Row(
+                    children: [
+                      if (current.artUri != null)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.network(
+                            current.artUri.toString(),
                             width: 48,
                             height: 48,
-                            color: Colors.grey[300],
-                            child: const Icon(Icons.music_note, size: 32),
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) => Container(
+                              width: 48,
+                              height: 48,
+                              color: Colors.grey[300],
+                              child: const Icon(Icons.music_note, size: 32),
+                            ),
                           ),
+                        )
+                      else
+                        Container(
+                          width: 48,
+                          height: 48,
+                          color: Colors.grey[300],
+                          child: const Icon(Icons.music_note, size: 32),
                         ),
-                      )
-                    else
-                      Container(
-                        width: 48,
-                        height: 48,
-                        color: Colors.grey[300],
-                        child: const Icon(Icons.music_note, size: 32),
-                      ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            current.title,
-                            style: Theme.of(context).textTheme.bodyLarge,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          if ((current.artist ?? '').isNotEmpty)
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
                             Text(
-                              current.artist!,
-                              style: Theme.of(context).textTheme.bodySmall,
+                              current.title,
+                              style: Theme.of(context).textTheme.bodyLarge,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                          StreamBuilder<Duration>(
-                            stream: myAudioHandler.positionStream,
-                            builder: (context, posSnap) {
-                              final pos = posSnap.data ?? Duration.zero;
-                              final total = current.duration ?? Duration.zero;
-                              return LinearProgressIndicator(
-                                value: total.inMilliseconds > 0
-                                    ? pos.inMilliseconds / total.inMilliseconds
-                                    : 0.0,
-                                minHeight: 3,
-                              );
-                            },
-                          ),
-                        ],
+                            if ((current.artist ?? '').isNotEmpty)
+                              Text(
+                                current.artist!,
+                                style: Theme.of(context).textTheme.bodySmall,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            StreamBuilder<Duration>(
+                              stream: myAudioHandler.positionStream,
+                              builder: (context, posSnap) {
+                                final pos = posSnap.data ?? Duration.zero;
+                                final total = current.duration ?? Duration.zero;
+                                return LinearProgressIndicator(
+                                  value: total.inMilliseconds > 0
+                                      ? pos.inMilliseconds / total.inMilliseconds
+                                      : 0.0,
+                                  minHeight: 3,
+                                );
+                              },
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    _PlayerControls(
-                      audioHandler: audioHandler,
-                      hasPrevious: hasPrevious,
-                      hasNext: hasNext,
-                      previousIndex: hasPrevious ? currentIndex - 1 : null,
-                      nextIndex: hasNext ? currentIndex + 1 : null,
-                      queue: queue,
-                    ),
-                  ],
+                      const SizedBox(width: 12),
+                      _PlayerControls(
+                        audioHandler: audioHandler,
+                        hasPrevious: hasPrevious,
+                        hasNext: hasNext,
+                        previousIndex: hasPrevious ? currentIndex - 1 : null,
+                        nextIndex: hasNext ? currentIndex + 1 : null,
+                        queue: queue,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );

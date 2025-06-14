@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:audio_service/audio_service.dart';
-import 'package:shared_preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:asteroid/audio_handler.dart';
 import 'dart:math';
 
 enum RepeatMode {
@@ -172,7 +173,7 @@ class QueueProvider with ChangeNotifier {
       return;
     }
 
-    final position = await audioHandler.position.first;
+    final position = await (audioHandler as MyAudioHandler).positionStream.first;
     if (position > const Duration(seconds: 3)) {
       // If more than 3 seconds into song, restart it
       await audioHandler.seek(Duration.zero);

@@ -5,7 +5,6 @@ import 'package:asteroid/widgets/library/recently_played_section.dart';
 import 'package:asteroid/widgets/library/favorites_section.dart';
 import 'package:asteroid/widgets/library/playlists_section.dart';
 import 'package:asteroid/providers/library_provider.dart';
-import 'package:asteroid/widgets/app_drawer.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -32,23 +31,19 @@ class _LibraryScreenState extends State<LibraryScreen> with SingleTickerProvider
     _tabController.dispose();
     super.dispose();
   }
-
   @override
   Widget build(BuildContext context) {
     final audioHandler = Provider.of<AudioHandler>(context);
 
-    return Scaffold(
-      drawer: const AppDrawer(),
-      appBar: AppBar(
-        title: const Text('Library'),
-        bottom: TabBar(
+    return Column(
+      children: [
+        TabBar(
           controller: _tabController,
           tabs: const [
             Tab(
               icon: Icon(Icons.history),
               text: 'Recent',
-            ),
-            Tab(
+            ),            Tab(
               icon: Icon(Icons.favorite),
               text: 'Favorites',
             ),
@@ -58,15 +53,17 @@ class _LibraryScreenState extends State<LibraryScreen> with SingleTickerProvider
             ),
           ],
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          RecentlyPlayedSection(audioHandler: audioHandler),
-          FavoritesSection(audioHandler: audioHandler),
-          PlaylistsSection(audioHandler: audioHandler),
-        ],
-      ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              RecentlyPlayedSection(audioHandler: audioHandler),
+              FavoritesSection(audioHandler: audioHandler),
+              PlaylistsSection(audioHandler: audioHandler),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

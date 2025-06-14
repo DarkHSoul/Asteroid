@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:audio_service/audio_service.dart';
+import 'dart:convert';
 
 class LibraryProvider with ChangeNotifier {
   List<MediaItem> _recentlyPlayed = [];
@@ -10,6 +11,31 @@ class LibraryProvider with ChangeNotifier {
   List<MediaItem> get recentlyPlayed => _recentlyPlayed;
   List<MediaItem> get favorites => _favorites;
   Map<String, List<MediaItem>> get playlists => _playlists;
+
+  // Helper methods for MediaItem serialization
+  Map<String, dynamic> _mediaItemToJson(MediaItem item) {
+    return {
+      'id': item.id,
+      'title': item.title,
+      'artist': item.artist,
+      'album': item.album,
+      'artUri': item.artUri?.toString(),
+      'duration': item.duration?.inMilliseconds,
+      'extras': item.extras,
+    };
+  }
+
+  MediaItem _mediaItemFromJson(Map<String, dynamic> json) {
+    return MediaItem(
+      id: json['id'] as String,
+      title: json['title'] as String,
+      artist: json['artist'] as String?,
+      album: json['album'] as String?,
+      artUri: json['artUri'] != null ? Uri.parse(json['artUri'] as String) : null,
+      duration: json['duration'] != null ? Duration(milliseconds: json['duration'] as int) : null,
+      extras: json['extras'] as Map<String, dynamic>?,
+    );
+  }
 
   // Recently Played
   void addToRecentlyPlayed(MediaItem item) {
@@ -65,37 +91,36 @@ class LibraryProvider with ChangeNotifier {
   }
 
   void deletePlaylist(String name) {
-    _playlists.remove(name);
-    _savePlaylists();
+    _playlists.remove(name);    _savePlaylists();
     notifyListeners();
   }
 
-  // Persistence
+  // Persistence  
   Future<void> loadLibrary() async {
     final prefs = await SharedPreferences.getInstance();
     
     // Load favorites
     final favoritesJson = prefs.getStringList('favorites') ?? [];
     _favorites = favoritesJson
-        .map((json) => MediaItem.fromJson(Map<String, dynamic>.from({...Map<String, dynamic>.from(const JsonDecoder().convert(json))})))
+        .map((json) => _mediaItemFromJson(jsonDecode(json) as Map<String, dynamic>))
         .toList();
 
     // Load recently played
     final recentJson = prefs.getStringList('recently_played') ?? [];
     _recentlyPlayed = recentJson
-        .map((json) => MediaItem.fromJson(Map<String, dynamic>.from({...Map<String, dynamic>.from(const JsonDecoder().convert(json))})))
+        .map((json) => _mediaItemFromJson(jsonDecode(json) as Map<String, dynamic>))
         .toList();
 
     // Load playlists
     final playlistsJson = prefs.getString('playlists');
     if (playlistsJson != null) {
-      final Map<String, dynamic> playlistsMap = const JsonDecoder().convert(playlistsJson);
+      final Map<String, dynamic> playlistsMap = jsonDecode(playlistsJson) as Map<String, dynamic>;
       _playlists = playlistsMap.map((key, value) {
         final List<dynamic> items = value;
         return MapEntry(
           key,
           items
-              .map((item) => MediaItem.fromJson(Map<String, dynamic>.from({...Map<String, dynamic>.from(item)})))
+              .map((item) => _mediaItemFromJson(Map<String, dynamic>.from(item)))
               .toList(),
         );
       });
@@ -105,17 +130,15 @@ class LibraryProvider with ChangeNotifier {
   }
 
   Future<void> _saveFavorites() async {
-    final prefs = await SharedPreferences.getInstance();
-    final favoritesJson = _favorites
-        .map((item) => const JsonEncoder().convert(item.toJson()))
+    final prefs = await SharedPreferences.getInstance();    final favoritesJson = _favorites
+        .map((item) => const JsonEncoder().convert(_mediaItemToJson(item)))
         .toList();
     await prefs.setStringList('favorites', favoritesJson);
   }
 
   Future<void> _saveRecentlyPlayed() async {
-    final prefs = await SharedPreferences.getInstance();
-    final recentJson = _recentlyPlayed
-        .map((item) => const JsonEncoder().convert(item.toJson()))
+    final prefs = await SharedPreferences.getInstance();    final recentJson = _recentlyPlayed
+        .map((item) => const JsonEncoder().convert(_mediaItemToJson(item)))
         .toList();
     await prefs.setStringList('recently_played', recentJson);
   }
@@ -123,7 +146,7 @@ class LibraryProvider with ChangeNotifier {
   Future<void> _savePlaylists() async {
     final prefs = await SharedPreferences.getInstance();
     final playlistsJson = const JsonEncoder().convert(_playlists.map((key, value) {
-      return MapEntry(key, value.map((item) => item.toJson()).toList());
+      return MapEntry(key, value.map((item) => _mediaItemToJson(item)).toList());
     }));
     await prefs.setString('playlists', playlistsJson);
   }

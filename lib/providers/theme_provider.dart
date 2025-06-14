@@ -8,6 +8,7 @@ class ThemeProvider with ChangeNotifier {
 
   CustomThemeMode get themeMode => _themeMode;
   MaterialColor get primarySwatch => _primarySwatch;
+  bool get isDarkMode => _themeMode == CustomThemeMode.dark || _themeMode == CustomThemeMode.amoled;
 
   void setThemeMode(CustomThemeMode mode) {
     _themeMode = mode;
@@ -16,6 +17,24 @@ class ThemeProvider with ChangeNotifier {
 
   void setPrimarySwatch(MaterialColor color) {
     _primarySwatch = color;
+    notifyListeners();
+  }
+
+  void toggleTheme() {
+    switch (_themeMode) {
+      case CustomThemeMode.light:
+        _themeMode = CustomThemeMode.dark;
+        break;
+      case CustomThemeMode.dark:
+        _themeMode = CustomThemeMode.light;
+        break;
+      case CustomThemeMode.system:
+        _themeMode = CustomThemeMode.dark;
+        break;
+      case CustomThemeMode.amoled:
+        _themeMode = CustomThemeMode.light;
+        break;
+    }
     notifyListeners();
   }
 }

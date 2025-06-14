@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:logging/logging.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
@@ -26,6 +27,23 @@ class YoutubeDLService {
       _logger.info('Returning cached stream URL for $videoId');
       return _streamUrlCache[videoId];
     }
+    
+    // Add timeout to prevent infinite loops
+    try {
+      return await _getStreamUrlInternal(videoId).timeout(
+        Duration(seconds: 30), // 30 second timeout
+      );
+    } on TimeoutException {
+      _logger.severe('Timeout getting stream URL for $videoId after 30 seconds');
+      return null;
+    } catch (e) {
+      _logger.severe('Error getting stream URL for $videoId: $e');
+      return null;
+    }
+  }
+
+  // Internal method to get streaming URL
+  Future<String?> _getStreamUrlInternal(String videoId) async {
     try {
       // Try the default client first, then fall back to alternative client profiles that often bypass 403 errors.
       final List<List<YoutubeApiClient>> clientFallbacks = [

@@ -4,11 +4,9 @@ import 'package:audio_service/audio_service.dart';
 import 'dart:async';
 import 'package:asteroid/providers/search_provider.dart';
 import 'package:asteroid/widgets/search/search_filters.dart';
-import 'package:asteroid/widgets/search/related_songs.dart';
 import 'package:asteroid/api/youtube_music_api.dart';
-import 'package:asteroid/widgets/app_drawer.dart';
-import 'package:asteroid/widgets/player_bar.dart';
 import 'package:asteroid/utils/ui_utils.dart';
+import 'package:asteroid/audio_handler.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -46,12 +44,10 @@ class _SearchScreenState extends State<SearchScreen> {
     final searchProvider = Provider.of<SearchProvider>(context, listen: false);
     if (!searchProvider.isLoadingMore &&
         searchProvider.continuationToken != null) {
-      searchProvider.setLoadingMore(true);
-      try {
-        final api = YoutubeMusicAPI();
-        final results = await api.searchMore(searchProvider.continuationToken!);
+      searchProvider.setLoadingMore(true);      try {
+        final results = await YouTubeMusicApi.searchContinuation(searchProvider.continuationToken!);
         if (!mounted) return;
-        searchProvider.appendResults(results.items, continuation: results.continuation);
+        searchProvider.appendResults(results, continuation: null);
       } catch (e) {
         if (!mounted) return;
         UIUtils.showError(
@@ -90,39 +86,24 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() => _isSearching = true);
     searchProvider.setLoading(true);
     
-    try {
-      final api = YoutubeMusicAPI();
-      final results = await api.search(query);
+    try {      final results = await YouTubeMusicApi.search(query);
       if (!mounted) return;
-      searchProvider.setResults(results.items, continuation: results.continuation);
+      searchProvider.setResults(results, continuation: null);
     } catch (e) {
       if (!mounted) return;
       UIUtils.showError(context, 'Search failed: ${e.toString()}');
     } finally {
       if (mounted) {
-        setState(() => _isSearching = false);
-        searchProvider.setLoading(false);
+        setState(() => _isSearching = false);        searchProvider.setLoading(false);
       }
     }
   }
-
-  @override
-  void dispose() {
-    _searchDebouncer?.cancel();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      drawer: const AppDrawer(),
-      appBar: AppBar(
-        title: const Text('Search'),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Consumer<SearchProvider>(
+    return Column(
+      children: [
+        Expanded(
+          child: Consumer<SearchProvider>(
               builder: (context, searchProvider, child) {
                 return Column(
                   children: [
@@ -200,9 +181,8 @@ class _SearchScreenState extends State<SearchScreen> {
                                     },
                                     child: ListView.builder(
                                       controller: _scrollController,
-                                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                                      padding: const EdgeInsets.only(bottom: 80),
-                                    itemCount: searchProvider.results.length + 1,
+                                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,                                      padding: const EdgeInsets.only(bottom: 80),
+                                      itemCount: searchProvider.results.length + 1,
                                     itemBuilder: (context, index) {
                                       if (index == searchProvider.results.length) {
                                         if (searchProvider.isLoadingMore) {
@@ -237,7 +217,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                             leading: ClipRRect(
                                               borderRadius: BorderRadius.circular(4),
                                               child: Image.network(
-                                                result.thumbnail,
+                                                result.thumbnailUrl,
                                                 width: 48,
                                                 height: 48,
                                                 fit: BoxFit.cover,
@@ -252,89 +232,89 @@ class _SearchScreenState extends State<SearchScreen> {
                                               result.artist,
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                            ),
-                                            trailing: result.isArtist || result.isAlbum
+                                            ),                                            trailing: result.isArtist || result.isAlbum
                                                 ? const Icon(Icons.chevron_right)
                                                 : IconButton(
-                                                    icon: const Icon(Icons.play_arrow),
-                                                    onPressed: () async {
+                                                    icon: searchProvider.isPlaying(result.videoId) 
+                                                        ? SizedBox(
+                                                            width: 24,
+                                                            height: 24,
+                                                            child: CircularProgressIndicator(
+                                                              strokeWidth: 2,
+                                                              valueColor: AlwaysStoppedAnimation<Color>(
+                                                                Theme.of(context).colorScheme.primary,
+                                                              ),
+                                                            ),
+                                                          )
+                                                        : const Icon(Icons.play_arrow),
+                                                    onPressed: searchProvider.isPlaying(result.videoId) 
+                                                        ? null
+                                                        : () async {
                                                       try {
+                                                        searchProvider.setPlayingState(result.videoId, true);
                                                         final mediaItem = MediaItem(
                                                           id: result.videoId,
                                                           title: result.title,
                                                           artist: result.artist,
-                                                          artUri: Uri.parse(result.thumbnail),
+                                                          artUri: Uri.parse(result.thumbnailUrl),
                                                           extras: {
                                                             'url': result.videoId,
+                                                            'videoId': result.videoId,
                                                             'duration': result.duration,
+                                                            'playlistId': result.playlistId,
+                                                            'params': result.params,
+                                                            'trackingParams': result.trackingParams,
                                                           },
                                                         );
-                                                        await audioHandler.playMediaItem(mediaItem);
+                                                        await (audioHandler as MyAudioHandler).playMediaItem(mediaItem, isFromSearch: true);
 
-                                                        // Load related songs
-                                                        try {
-                                                          final api = YoutubeMusicAPI();
-                                                          final related = await api.getRelatedSongs(result.videoId);
-                                                          searchProvider.updateRelatedSongs(related);
-                                                        } catch (e) {
-                                                          debugPrint('Error loading related songs: $e');
-                                                        }
+                                                        // Note: Related songs are now automatically fetched and added to up-next
+                                                        // via the audio handler's addQueueItem method
                                                       } catch (e) {
                                                         UIUtils.showError(context, e.toString());
+                                                      } finally {
+                                                        searchProvider.setPlayingState(result.videoId, false);
                                                       }
                                                     },
                                                   ),
                                             onTap: () async {
                                               if (result.isArtist || result.isAlbum) {
                                                 // TODO: Navigate to artist/album page
-                                              } else {
-                                                try {
+                                              } else {                                                try {
                                                   final mediaItem = MediaItem(
                                                     id: result.videoId,
                                                     title: result.title,
                                                     artist: result.artist,
-                                                    artUri: Uri.parse(result.thumbnail),
+                                                    artUri: Uri.parse(result.thumbnailUrl),
                                                     extras: {
                                                       'url': result.videoId,
+                                                      'videoId': result.videoId,
                                                       'duration': result.duration,
+                                                      'playlistId': result.playlistId,
+                                                      'params': result.params,
+                                                      'trackingParams': result.trackingParams,
                                                     },
-                                                  );
-                                                  await audioHandler.playMediaItem(mediaItem);
-
-                                                  // Load related songs
-                                                  try {
-                                                    final api = YoutubeMusicAPI();
-                                                    final related = await api.getRelatedSongs(result.videoId);
-                                                    searchProvider.updateRelatedSongs(related);
-                                                  } catch (e) {
-                                                    debugPrint('Error loading related songs: $e');
-                                                  }
+                                                  );await (audioHandler as MyAudioHandler).playMediaItem(mediaItem, isFromSearch: true);
+                                                  
+                                                  // Note: Related songs are now automatically fetched and added to up-next
+                                                  // via the audio handler's addQueueItem method
                                                 } catch (e) {
                                                   UIUtils.showError(context, e.toString());
                                                 }
-                                              }
-                                            },
+                                              }                                            },
                                           );
                                         },
                                       );
                                     },
                                   ),
-                      ),
-                    ),
-                    if (searchProvider.relatedSongs.isNotEmpty)
-                      Consumer<AudioHandler>(
-                        builder: (context, audioHandler, child) {
-                          return RelatedSongs(audioHandler: audioHandler);
-                        },
-                      ),
+                                ),
+                      ),                    ),
                   ],
                 );
               },
             ),
           ),
-          const PlayerBar(),
         ],
-      ),
     );
   }
 }

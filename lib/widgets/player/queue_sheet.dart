@@ -113,10 +113,7 @@ class QueueSheet extends StatelessWidget {
                         return StreamBuilder<MediaItem?>(
                           stream: audioHandler.mediaItem,
                           builder: (context, snapshot) {
-                            final currentItem = snapshot.data;
-
-                            return ReorderableListView.builder(
-                              controller: scrollController,
+                            final currentItem = snapshot.data;                            return ReorderableListView.builder(
                               onReorder: queueProvider.moveItem,
                               itemCount: queue.length,
                               itemBuilder: (context, index) {

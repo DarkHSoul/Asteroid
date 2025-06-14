@@ -1,10 +1,8 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:asteroid/audio_handler.dart';
-import 'package:asteroid/providers/queue_provider.dart';
-import 'package:asteroid/providers/library_provider.dart';
 import 'package:asteroid/widgets/player/player_controls.dart';
+import 'package:asteroid/audio_handler.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
@@ -62,13 +60,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   bool get _isFullyExpanded =>
       _sheetController.isAttached ? _sheetController.size >= 0.99 : false;
-
   @override
   Widget build(BuildContext context) {
     final audioHandler = Provider.of<AudioHandler>(context);
-    final myAudioHandler = audioHandler as MyAudioHandler;
-    // Safely cast to MyAudioHandler to access nextSongsStream
-    final nextSongsStream = myAudioHandler.nextSongsStream;
 
     return StreamBuilder<MediaItem?>(
         stream: audioHandler.mediaItem,
@@ -227,29 +221,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ),
                           ),
                           if (!_isCollapsed) const SliverToBoxAdapter(child: Divider(height: 1)),
-                          if (!_isCollapsed)
-                            Consumer<QueueProvider>(
-                              builder: (context, queueProvider, child) {
-                                final queue = queueProvider.queue;
-                                
-                                if (queue.isEmpty) {
-                                  return const SliverFillRemaining(
-                                    hasScrollBody: false,
-                                    child: Center(
-                                      child: Text('Queue is empty'),
-                                    ),
-                                  );
-                                }
-
-                                return SliverList.builder(
-                                  itemCount: queue.length,
+                          if (!_isCollapsed)                            Consumer<AudioHandler>(
+                              builder: (context, audioHandler, child) {
+                                final myAudioHandler = audioHandler as MyAudioHandler;
+                                return StreamBuilder<List<MediaItem>>(
+                                  stream: myAudioHandler.nextSongsStream,
+                                  builder: (context, snapshot) {
+                                    final upNextSongs = snapshot.data ?? [];if (upNextSongs.isEmpty) {
+                                      return const SliverFillRemaining(
+                                        hasScrollBody: false,
+                                        child: Center(
+                                          child: Text('No upcoming songs'),
+                                        ),
+                                      );
+                                    }return SliverList.builder(
+                                  itemCount: upNextSongs.length,
                                   itemBuilder: (context, index) {
-                                    final song = queue[index];
-                                    final bool isCurrent = song.id == mediaItem.id;
-                                    
-                                    return Dismissible(
-                                      key: Key(song.id),
-                                      direction: DismissDirection.endToStart,
+                                    final song = upNextSongs[index];
+                                    final bool isCurrent = song.id == mediaItem.id;                                    // Check if this is the first search song
+                                    final bool isFirstSearchSong = myAudioHandler.firstSearchSong?.id == song.id;
+                                      return Dismissible(
+                                      key: Key('${song.id}_$index'),                                      direction: isCurrent ? DismissDirection.none : DismissDirection.endToStart,
                                       background: Container(
                                         alignment: Alignment.centerRight,
                                         padding: const EdgeInsets.only(right: 20),
@@ -259,7 +251,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           color: Colors.white,
                                         ),
                                       ),
-                                      onDismissed: (_) => queueProvider.removeItem(index),
+                                      confirmDismiss: (direction) async {
+                                        if (isCurrent) return false;
+                                        return true;
+                                      },onDismissed: (_) {
+                                        // Remove from up next
+                                        myAudioHandler.removeFromUpNext(song.id);
+                                      },
                                       child: ListTile(
                                         leading: ClipRRect(
                                           borderRadius: BorderRadius.circular(6),
@@ -278,33 +276,69 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                                       .withOpacity(0.1),
                                                   child: const Icon(Icons.music_note),
                                                 ),
+                                        ),                                        title: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                song.title,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,                                                style: isCurrent
+                                                    ? TextStyle(
+                                                        color: Theme.of(context).colorScheme.primary,
+                                                        fontWeight: FontWeight.bold,
+                                                      )
+                                                    : TextStyle(
+                                                        color: Theme.of(context).colorScheme.onSurface,
+                                                      ),
+                                              ),
+                                            ),
+                                            if (isFirstSearchSong && index == 0)
+                                              Container(
+                                                margin: const EdgeInsets.only(left: 8),
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(context).primaryColor.withOpacity(0.2),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  'From Search',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: Theme.of(context).primaryColor,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
                                         ),
-                                        title: Text(
-                                          song.title,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: isCurrent
-                                              ? TextStyle(
-                                                  color: Theme.of(context).primaryColor,
-                                                  fontWeight: FontWeight.bold,
-                                                )
-                                              : null,
-                                        ),
-                                        subtitle: Text(
-                                          song.artist ?? '',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
+                                        subtitle: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                song.artist ?? '',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            if (index > 0 && !isFirstSearchSong)
+                                              Text(
+                                                'Similar',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6),
+                                                ),
+                                              ),
+                                          ],
                                         ),
                                         trailing: ReorderableDragStartListener(
                                           index: index,
                                           child: const Icon(Icons.drag_handle),
-                                        ),
-                                        onTap: () async {
-                                          await audioHandler.skipToQueueItem(index);
-                                          await audioHandler.play();
+                                        ),                                        onTap: () async {
+                                          await myAudioHandler.playFromUpNext(index);
                                         },
                                       ),
-                                    );
+                                    );                                  },
+                                );
                                   },
                                 );
                               },

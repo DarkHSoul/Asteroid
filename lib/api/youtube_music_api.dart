@@ -26,6 +26,37 @@ class YoutubeMusicVideo {
     this.playlistId,
     this.params,
   });
+
+  // Serialization methods
+  Map<String, dynamic> toJson() => {
+    'videoId': videoId,
+    'title': title,
+    'artist': artist,
+    'thumbnailUrl': thumbnailUrl,
+    'duration': duration,
+    'viewCount': viewCount,
+    'trackingParams': trackingParams,
+    'playlistId': playlistId,
+    'params': params,
+  };
+
+  factory YoutubeMusicVideo.fromJson(Map<String, dynamic> json) {
+    return YoutubeMusicVideo(
+      videoId: json['videoId'] as String,
+      title: json['title'] as String,
+      artist: json['artist'] as String,
+      thumbnailUrl: json['thumbnailUrl'] as String,
+      duration: json['duration'] as String,
+      viewCount: json['viewCount'] as int?,
+      trackingParams: json['trackingParams'] as String?,
+      playlistId: json['playlistId'] as String?,
+      params: json['params'] as String?,
+    );
+  }
+
+  // Helper properties
+  bool get isArtist => false; // Placeholder - implement based on your logic
+  bool get isAlbum => false;  // Placeholder - implement based on your logic
 }
 
 class YouTubeMusicApi {
@@ -546,4 +577,4 @@ class YouTubeMusicApi {
     }
     return videos;
   }
-} 
+}

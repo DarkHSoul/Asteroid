@@ -24,22 +24,41 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   final _logger = Logger('AudioHandler');
   
   // Keep track of whether we're currently processing a play request
-  bool _processingPlayRequest = false;
-  final _nextSongsController = StreamController<List<MediaItem>>.broadcast();
+  bool _processingPlayRequest = false;  final _nextSongsController = StreamController<List<MediaItem>>.broadcast();
   List<MediaItem> _latestSimilarSongs = [];
-  Stream<List<MediaItem>> get nextSongsStream => _nextSongsController.stream;
+  List<MediaItem> _currentUpNextList = [];
+  
+  Stream<List<MediaItem>> get nextSongsStream {
+    // Create a stream that immediately emits the current value to new listeners
+    return Stream<List<MediaItem>>.multi((controller) {
+      // Immediately emit current value
+      controller.add(_currentUpNextList);
+      
+      // Listen to future updates
+      final subscription = _nextSongsController.stream.listen(
+        (data) => controller.add(data),
+        onError: (error) => controller.addError(error),
+        onDone: () => controller.close(),
+      );
+      
+      controller.onCancel = () => subscription.cancel();
+    });
+  }
   List<MediaItem> get latestSimilarSongs => _latestSimilarSongs;
   final YouTubeService _youtubeService = YouTubeService();
   // Add a position stream for real-time updates
   Stream<Duration> get positionStream => _player.positionStream;
-
   MediaItem? _sessionFirstSong; // first track started this session
   MediaItem? get sessionFirstSong => _sessionFirstSong;
+  
+  // Track the first song played from search for up-next list
+  MediaItem? _firstSearchSong;
+  MediaItem? get firstSearchSong => _firstSearchSong;
 
   bool _skipNextInProgress = false;
-
   MyAudioHandler() {
-    print('MyAudioHandler initialized');
+    print('[UP-NEXT DEBUG] MyAudioHandler initialized');
+    print('[UP-NEXT DEBUG] nextSongsStream initialized: ${_nextSongsController.stream}');
     _notifyAudioHandlerAboutPlaybackEvents();
     _listenForDurationChanges();
     _listenForCurrentSongIndexChanges();
@@ -50,42 +69,18 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     // Initialize the player with the playlist
     _initializePlayer();
   }
-
   void _listenForSettingsChanges() {
-    // Get settings instance
-    final settings = SettingsProvider();
-    
-    // Apply initial settings
-    _applySettings(settings);
-    
     // Listen for volume changes from the player
     _player.volumeStream.listen((volume) {
-      if (settings.volume != volume) {
-        settings.setVolume(volume);
-      }
+      _logger.info('Volume changed to: $volume');
     });
   }
 
-  Future<void> _applySettings(SettingsProvider settings) async {
+  Future<void> _applySettings() async {
     try {
-      // Apply volume
-      await _player.setVolume(settings.volume);
-
-      // Apply volume normalization if supported
-      if (_player.audioNormalizationSupported) {
-        await _player.setAudioNormalization(settings.normalizeVolume);
-      }
-
-      // Apply equalizer if supported and enabled
-      if (_player.equalizerSupported && settings.equalizerEnabled) {
-        final bands = settings.currentPreset.bands;
-        for (var i = 0; i < bands.length; i++) {
-          await _player.setEqualizer(i, bands[i]);
-        }
-      } else if (_player.equalizerSupported) {
-        await _player.resetEqualizer();
-      }
-
+      // Apply basic volume setting
+      await _player.setVolume(1.0);
+      
       _logger.info('Applied audio settings successfully');
     } catch (e) {
       _logger.severe('Error applying audio settings: $e');
@@ -173,9 +168,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     } catch (e) {
       _logger.severe('Error initializing audio player: $e');
     }
-  }
-
-  @override
+  }  @override
   Future<void> addQueueItem(MediaItem mediaItem, {bool prefetchSimilarSongs = true}) async {
     try {
       _logger.info('Adding queue item: ${mediaItem.title} - ${mediaItem.id}');
@@ -206,7 +199,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       
       if (url.isEmpty) {
         _logger.severe('Empty URL for media item: ${mediaItem.title}');
-        throw Exception('Empty URL for media item');
+        throw PlaybackException('Empty URL for media item');
       }
       
       _logger.info('Using URL: $url');
@@ -226,7 +219,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         
         // Ensure URL has a valid scheme
         if (uri.scheme.isEmpty) {
-          throw Exception('Missing scheme in URL');
+          throw PlaybackException('Missing scheme in URL');
         }
       } catch (e) {
         _logger.severe('Error parsing URL: $e');
@@ -239,7 +232,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
           url = 'https://$url';
           _logger.info('Fixed URL by adding https:// scheme: $url');
         } else {
-          throw Exception('Invalid URL format: $url');
+          throw PlaybackException('Invalid URL format: $url');
         }
       }
       
@@ -272,45 +265,96 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         await _player.setAudioSource(_playlist);
         _logger.info('Player initialized with playlist');
       }
-      
-      // Prefetch similar songs immediately so Up Next is ready
-      if (prefetchSimilarSongs) {
+        // Prefetch similar songs immediately so Up Next is ready
+      print('[UP-NEXT DEBUG] addQueueItem called with prefetchSimilarSongs: $prefetchSimilarSongs');      if (prefetchSimilarSongs) {
         try {
           final videoId = mediaItem.extras?['videoId'] as String? ??
-              _extractYouTubeVideoId(mediaItem.extras?['url'] as String? ?? mediaItem.id);
-          if (videoId != null && videoId.isNotEmpty) {
+              _extractYouTubeVideoId(mediaItem.extras?['url'] as String? ?? mediaItem.id);          if (videoId != null && videoId.isNotEmpty) {
             final playlistId = mediaItem.extras?['playlistId'] as String?;
             final params = mediaItem.extras?['params'] as String?;
-            // _logger.info('[NEXT API] (addQueueItem) Fetching similar songs for videoId: ' + videoId + ', playlistId: ' + (playlistId ?? 'null') + ', params: ' + (params ?? 'null'));
             final similarVideos = await YouTubeMusicApi.fetchSimilarSongs(
               videoId,
               playlistId: playlistId,
               params: params,
             );
+            print('[UP-NEXT DEBUG] Found ${similarVideos.length} similar videos');
             final nextMediaItems = similarVideos.map((v) => _youtubeService.youtubeVideoToMediaItem(v)).toList();
-            if (nextMediaItems.isNotEmpty) {
-              // Prepend the currently playing song to the similar songs list
-              final List<MediaItem> fullUpNextList = [mediaItem, ...nextMediaItems];
-              _latestSimilarSongs = fullUpNextList;
+            print('[UP-NEXT DEBUG] Converted to ${nextMediaItems.length} media items');            if (nextMediaItems.isNotEmpty) {
+              // Create the up-next list with first search song at top, followed by similar songs
+              final List<MediaItem> fullUpNextList = [];
+              
+              // Always add the first search song at the top if it exists and is different from current song
+              if (_firstSearchSong != null) {
+                final firstVideoId = _firstSearchSong!.extras?['videoId'] as String? ??
+                    _extractYouTubeVideoId(_firstSearchSong!.extras?['url'] as String? ?? _firstSearchSong!.id);
+                final currentVideoId = mediaItem.extras?['videoId'] as String? ??
+                    _extractYouTubeVideoId(mediaItem.extras?['url'] as String? ?? mediaItem.id);
+                    
+                if (firstVideoId != currentVideoId) {
+                  fullUpNextList.add(_firstSearchSong!);
+                  print('[UP-NEXT DEBUG] Added first search song: ${_firstSearchSong!.title}');
+                }
+              }
+              
+              // Add current song if it's not already added above
+              if (fullUpNextList.isEmpty || fullUpNextList.first.id != mediaItem.id) {
+                fullUpNextList.add(mediaItem);
+                print('[UP-NEXT DEBUG] Added current song: ${mediaItem.title}');
+              }
+              
+              // Add similar songs, filtering out any that might duplicate the first search song
+              for (final similarSong in nextMediaItems) {
+                final similarVideoId = similarSong.extras?['videoId'] as String? ??
+                    _extractYouTubeVideoId(similarSong.extras?['url'] as String? ?? similarSong.id);
+                    
+                // Check if this similar song is already in the list
+                final isDuplicate = fullUpNextList.any((existing) {
+                  final existingVideoId = existing.extras?['videoId'] as String? ??
+                      _extractYouTubeVideoId(existing.extras?['url'] as String? ?? existing.id);
+                  return existingVideoId == similarVideoId;
+                });
+                
+                if (!isDuplicate) {
+                  fullUpNextList.add(similarSong);
+                }
+              }              print('[UP-NEXT DEBUG] Created fullUpNextList with ${fullUpNextList.length} items');
+              _latestSimilarSongs = fullUpNextList.skip(5).toList(); // Keep most songs for the existing system
+              _currentUpNextList = fullUpNextList;
               _nextSongsController.add(fullUpNextList);
+              print('[UP-NEXT DEBUG] Added to stream: ${fullUpNextList.map((e) => e.title).join(", ")}');
+              print('[UP-NEXT DEBUG] Kept ${_latestSimilarSongs.length} songs in _latestSimilarSongs for later loading');
+                // Add the next 3-5 songs to the main playlist for seamless playback (in background)
+              _addNextSongsToPlaylist(fullUpNextList.skip(1).take(4).toList());
             } else {
-               // If no similar songs are found, the "Up Next" list should just contain the current song
-               final List<MediaItem> fullUpNextList = [mediaItem];
+               // If no similar songs are found, create up-next list with first search song (if different) and current song
+               final List<MediaItem> fullUpNextList = [];
+               
+               if (_firstSearchSong != null) {
+                 final firstVideoId = _firstSearchSong!.extras?['videoId'] as String? ??
+                     _extractYouTubeVideoId(_firstSearchSong!.extras?['url'] as String? ?? _firstSearchSong!.id);
+                 final currentVideoId = mediaItem.extras?['videoId'] as String? ??
+                     _extractYouTubeVideoId(mediaItem.extras?['url'] as String? ?? mediaItem.id);
+                     
+                 if (firstVideoId != currentVideoId) {
+                   fullUpNextList.add(_firstSearchSong!);
+                   print('[UP-NEXT DEBUG] Added first search song (no similar): ${_firstSearchSong!.title}');
+                 }
+               }
+                 fullUpNextList.add(mediaItem);
+               print('[UP-NEXT DEBUG] No similar songs found, list: ${fullUpNextList.map((e) => e.title).join(", ")}');
                _latestSimilarSongs = fullUpNextList;
-               _nextSongsController.add(fullUpNextList);
-            }            // _logger.info('[NEXT API] (addQueueItem) Similar songs found: ' + nextMediaItems.length.toString());
-            for (final _ in nextMediaItems) {
-              // _logger.info('[NEXT API] (addQueueItem)   - ' + item.title + ' (' + item.id + ')');
-            }
-            if (nextMediaItems.isNotEmpty) {
-              // Removed verbose console printing of similar songs
-              // debug print removed
-            }
+               _currentUpNextList = fullUpNextList;
+               _nextSongsController.add(fullUpNextList);}
             // Cache fetch result to avoid duplicate network calls when the track starts playing
+          } else {
+            print('[UP-NEXT DEBUG] No videoId found or videoId is empty');
           }
         } catch (e) {
+          print('[UP-NEXT DEBUG] Error prefetching similar songs: $e');
           _logger.warning('Error prefetching similar songs: $e');
         }
+      } else {
+        print('[UP-NEXT DEBUG] Skipping prefetch similar songs');
       }
       
     } catch (e, stackTrace) {
@@ -330,9 +374,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       _logger.severe('Error removing queue item: $e');
     }
   }
-
   @override
   Future<void> play() async {
+    print('[DEBUG] play() method called');
     if (_processingPlayRequest) {
       _logger.info('Already processing a play request, ignoring additional request');
       return;
@@ -342,26 +386,34 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     
     try {
       // Check if we have any items in the playlist
+      print('[DEBUG] play() - Playlist length: ${_playlist.length}');
       _logger.info('Playlist length: ${_playlist.length}');
       if (_playlist.length == 0) {
         _logger.warning('Attempted to play with empty playlist');
+        print('[ERROR] play() - Empty playlist!');
         return;
       }
       
       // Check if player has been properly initialized
       if (_player.audioSource == null) {
+        print('[DEBUG] play() - Player not initialized, setting audio source');
         _logger.info('Player not initialized, setting audio source');
         await _player.setAudioSource(_playlist);
         _logger.info('Player initialized with playlist');
+        print('[DEBUG] play() - Player initialized with playlist');
       }
       
       // Now play
+      print('[DEBUG] play() - Starting playback...');
       _logger.info('Starting playback');
       await _player.play();
       _logger.info('Playback started successfully');
+      print('[DEBUG] play() - Playback started successfully');
     } catch (e, stackTrace) {
       _logger.severe('Error in play method: $e');
       _logger.severe('Stack trace: $stackTrace');
+      print('[ERROR] play() - Error: $e');
+      print('[ERROR] play() - Stack trace: $stackTrace');
     } finally {
       _processingPlayRequest = false;
     }
@@ -404,9 +456,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         _logger.info('[NEXT API] Main playlist exhausted, adding all similar songs (${_latestSimilarSongs.length}) to main playlist.');
 
         final songsToAdd = _latestSimilarSongs.toList(); // Create a copy
-        final firstAddedIndex = _playlist.length; // Index where new songs will start
-
-        _latestSimilarSongs = []; // Clear the similar list as it's being moved to the main queue
+        final firstAddedIndex = _playlist.length; // Index where new songs will start        _latestSimilarSongs = []; // Clear the similar list as it's being moved to the main queue
+        _currentUpNextList = [];
         _nextSongsController.add([]); // Update the 'Up Next' stream to show it's empty
 
         final audioSourcesToAdd = <AudioSource>[];
@@ -528,20 +579,29 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     await _nextSongsController.close();
     super.stop();
   }
-
-  Future<void> clearAndPlay(MediaItem mediaItem, {bool resetSimilar = true}) async {
+  Future<void> clearAndPlay(MediaItem mediaItem, {bool resetSimilar = true, bool isFromSearch = false}) async {
     try {
-      _logger.info('clearAndPlay called');      if (resetSimilar) {
+      _logger.info('clearAndPlay called');
+      
+      // If this is from search, mark it as the first search song
+      if (isFromSearch && _firstSearchSong == null) {
+        _firstSearchSong = mediaItem;
+        print('[UP-NEXT DEBUG] Set first search song in clearAndPlay: ${mediaItem.title}');
+      }
+        if (resetSimilar) {
         // Reset cached similar-songs information so a brand-new Up Next list is fetched for this track
         _latestSimilarSongs = [];
-      }
-
-      // Ensure we have a playable URL
+        _currentUpNextList = [];
+      }      // Ensure we have a playable URL
       String? url = mediaItem.extras?['url'] as String? ?? mediaItem.id;
+      print('[DEBUG] clearAndPlay - Original URL: $url');
+      
       if (url.length == 11 && !url.contains('/') && !url.contains('.')) {
         // looks like a YouTube videoId, resolve to stream url first
+        print('[DEBUG] clearAndPlay - Detected YouTube videoId, resolving streaming URL...');
         final stream = await _youtubeService.getStreamingUrl(url);
         if (stream != null) {
+          print('[DEBUG] clearAndPlay - Successfully resolved streaming URL: ${stream.substring(0, 50)}...');
           mediaItem = mediaItem.copyWith(
             id: stream,
             extras: {
@@ -552,13 +612,18 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
           url = stream;
         } else {
           _logger.warning('Could not resolve streaming URL for videoId=$url');
+          print('[ERROR] clearAndPlay - Failed to resolve streaming URL for videoId: $url');
+          throw PlaybackException('Unable to get streaming URL for this song');
         }
-      }
-
-      await _player.stop();
+      }      await _player.stop();
       await _playlist.clear();
-      queue.add([]);      // Reset player source – prefetch similar songs only when we reset the list.
+      queue.add([]);
+      
+      print('[DEBUG] clearAndPlay - About to call addQueueItem with: ${mediaItem.title}');
+      // Reset player source – prefetch similar songs only when we reset the list.
       await addQueueItem(mediaItem, prefetchSimilarSongs: resetSimilar);
+      
+      print('[DEBUG] clearAndPlay - About to call play()');
       await play();
       // Log benzer şarkılar
       // _logger.info('[NEXT API] (clearAndPlay) Latest similar songs: ' + _latestSimilarSongs.length.toString());
@@ -657,10 +722,22 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     } catch (e) {
       _logger.severe('Error updating queue: $e');
     }
-  }
-
-  Future<void> playMediaItem(MediaItem mediaItem) async {
+  }  Future<void> playMediaItem(MediaItem mediaItem, {bool isFromSearch = false}) async {
+    // Prevent multiple simultaneous play requests
+    if (_processingPlayRequest) {
+      print('[DEBUG] playMediaItem - IGNORED (already processing) for: ${mediaItem.title}');
+      return;
+    }
+    
+    _processingPlayRequest = true;
+    print('[DEBUG] playMediaItem - START for: ${mediaItem.title}');
     try {
+      // If this is from search, mark it as the first search song
+      if (isFromSearch && _firstSearchSong == null) {
+        _firstSearchSong = mediaItem;
+        print('[UP-NEXT DEBUG] Set first search song: ${mediaItem.title}');
+      }
+      
       final idx = queue.value.indexWhere((m) {
         final vid1 = m.extras?['videoId'] ?? _extractYouTubeVideoId(m.extras?['url'] as String? ?? m.id);
         final vid2 = mediaItem.extras?['videoId'] ?? _extractYouTubeVideoId(mediaItem.extras?['url'] as String? ?? mediaItem.id);
@@ -668,16 +745,20 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       });
 
       // Apply current settings before playing
-      await _applySettings(SettingsProvider());
-
+      await _applySettings();
       if (idx != -1) {
+        print('[DEBUG] playMediaItem - Song found in queue at index $idx, seeking and playing: ${mediaItem.title}');
         await _player.seek(Duration.zero, index: idx);
         await _player.play();
       } else {
-        // Replace current playback with the chosen media item but keep existing similar list.
-        await clearAndPlay(mediaItem, resetSimilar: false);
+        print('[DEBUG] playMediaItem - Song not in queue, calling clearAndPlay for: ${mediaItem.title}');
+        // Replace current playback with the chosen media item
+        // Reset similar songs when playing from search, otherwise keep existing similar list
+        await clearAndPlay(mediaItem, resetSimilar: isFromSearch, isFromSearch: isFromSearch);
+        print('[DEBUG] playMediaItem - clearAndPlay COMPLETED for: ${mediaItem.title}');
       }
     } catch (e, st) {
+      print('[DEBUG] playMediaItem - ERROR for: ${mediaItem.title}: $e');
       _logger.severe('Error in playMediaItem: $e');
       _logger.severe(st);
       // Notify the UI about the error
@@ -689,8 +770,143 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       } else {
         throw PlaybackException('Unable to play this song. Please try again later.');
       }
+    } finally {
+      _processingPlayRequest = false;
+      print('[DEBUG] playMediaItem - END for: ${mediaItem.title}');
     }
   }
+
+  // Method to play a specific song from the up-next list
+  Future<void> playFromUpNext(int upNextIndex) async {
+    try {
+      if (upNextIndex < 0 || upNextIndex >= _latestSimilarSongs.length) {
+        _logger.warning('Invalid up-next index: $upNextIndex');
+        return;
+      }
+      
+      final targetSong = _latestSimilarSongs[upNextIndex];
+      print('[UP-NEXT DEBUG] Playing from up-next index $upNextIndex: ${targetSong.title}');
+      
+      // If it's the currently playing song, just ensure it's playing
+      final currentSong = await mediaItem.first;
+      if (currentSong != null) {
+        final currentVideoId = currentSong.extras?['videoId'] as String? ??
+            _extractYouTubeVideoId(currentSong.extras?['url'] as String? ?? currentSong.id);
+        final targetVideoId = targetSong.extras?['videoId'] as String? ??
+            _extractYouTubeVideoId(targetSong.extras?['url'] as String? ?? targetSong.id);
+            
+        if (currentVideoId == targetVideoId) {
+          await play();
+          return;
+        }
+      }
+      
+      // Check if the target song is already in the main queue
+      final mainQueue = queue.value;
+      final queueIndex = mainQueue.indexWhere((item) {
+        final queueVideoId = item.extras?['videoId'] as String? ??
+            _extractYouTubeVideoId(item.extras?['url'] as String? ?? item.id);
+        final targetVideoId = targetSong.extras?['videoId'] as String? ??
+            _extractYouTubeVideoId(targetSong.extras?['url'] as String? ?? targetSong.id);
+        return queueVideoId == targetVideoId;
+      });
+      
+      if (queueIndex != -1) {
+        // Song is in main queue, skip to it
+        await skipToQueueItem(queueIndex);
+        await play();
+      } else {
+        // Song is not in main queue, play it directly
+        await clearAndPlay(targetSong, resetSimilar: false);
+      }
+    } catch (e, stackTrace) {
+      _logger.severe('Error playing from up-next: $e');
+      _logger.severe('Stack trace: $stackTrace');
+    }
+  }
+
+  // Method to reset the first search song (useful when starting a new search session)
+  void resetFirstSearchSong() {
+    _firstSearchSong = null;
+    print('[UP-NEXT DEBUG] Reset first search song');
+  }
+    // Method to clear the session and start fresh
+  void clearSession() {
+    _sessionFirstSong = null;
+    _firstSearchSong = null;
+    _latestSimilarSongs = [];
+    _currentUpNextList = [];
+    _nextSongsController.add([]);
+    print('[UP-NEXT DEBUG] Cleared session');
+  }
+
+  // Remove a song from the up-next list
+  void removeFromUpNext(String songId) {
+    final currentList = _currentUpNextList.toList();
+    currentList.removeWhere((item) {
+      final itemVideoId = item.extras?['videoId'] as String? ??
+          _extractYouTubeVideoId(item.extras?['url'] as String? ?? item.id);
+      final targetVideoId = _extractYouTubeVideoId(songId) ?? songId;
+      return itemVideoId == targetVideoId || item.id == songId;
+    });
+    
+    _currentUpNextList = currentList;
+    _latestSimilarSongs = currentList;
+    _nextSongsController.add(currentList);
+    print('[UP-NEXT DEBUG] Removed song from up-next list, new size: ${currentList.length}');
+  }
+
+  // Add songs to the main playlist for seamless next/previous functionality
+  Future<void> _addNextSongsToPlaylist(List<MediaItem> songsToAdd) async {
+    if (songsToAdd.isEmpty) return;
+      print('[UP-NEXT DEBUG] Adding ${songsToAdd.length} songs to main playlist for seamless playback');
+      // Add a delay to ensure the current song is properly loaded and playing first
+    await Future.delayed(const Duration(seconds: 2));
+    
+    for (final item in songsToAdd) {
+      try {
+        String? videoId = item.extras?['videoId'] as String? ?? 
+            _extractYouTubeVideoId(item.extras?['url'] as String? ?? item.id);
+        String? streamUrl;
+
+        if (videoId != null && videoId.length == 11) {
+          // Get streaming URL for the song
+          streamUrl = await _youtubeService.getStreamingUrl(videoId);
+          if (streamUrl == null) {
+            print('[UP-NEXT DEBUG] Failed to get stream URL for: ${item.title}');
+            continue;
+          }
+        } else {
+          // Use existing URL
+          streamUrl = item.extras?['url'] as String? ?? item.id;
+        }        // Create audio source and add to playlist
+        final audioSource = AudioSource.uri(
+          Uri.parse(streamUrl),
+          tag: item.copyWith(id: streamUrl),
+        );
+        
+        await _playlist.add(audioSource);
+          // Add to queue
+        final newQueue = queue.value..add(item.copyWith(
+          id: streamUrl,
+          extras: {
+            ...?item.extras,
+            'url': streamUrl,
+          },
+        ));
+        queue.add(newQueue);
+        
+        print('[UP-NEXT DEBUG] Added to main playlist: ${item.title}');
+        
+        // Small delay between additions to prevent overwhelming the player
+        await Future.delayed(const Duration(milliseconds: 100));
+      } catch (e) {
+        print('[UP-NEXT DEBUG] Error adding ${item.title} to playlist: $e');
+        continue;
+      }
+    }
+  }
+}
 
 class PlaybackException implements Exception {
   final String message;
@@ -698,4 +914,3 @@ class PlaybackException implements Exception {
   @override
   String toString() => message;
 }
-} 

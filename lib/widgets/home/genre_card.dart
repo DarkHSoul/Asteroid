@@ -19,7 +19,7 @@ class Genre {
     ),
     Genre(
       name: 'Rock',
-      icon: Icons.electric_guitar,
+      icon: Icons.music_note,
       color: Colors.purple,
     ),
     Genre(

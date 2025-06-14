@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:asteroid/api/youtube_music_api.dart';
 import 'dart:convert';
 
@@ -47,6 +47,7 @@ class SearchProvider with ChangeNotifier {
   SearchFilter _currentFilter = SearchFilter.all;
   Map<String, CachedSearch> _searchCache = {};
   List<YoutubeMusicVideo> _relatedSongs = [];
+  Set<String> _playingVideoIds = {}; // Track which songs are currently loading/playing
   
   static const int _maxCacheAge = 3600; // Cache for 1 hour
   static const int _maxCacheEntries = 50;
@@ -58,11 +59,11 @@ class SearchProvider with ChangeNotifier {
   String? get continuationToken => _continuationToken;
   SearchFilter get currentFilter => _currentFilter;
   List<YoutubeMusicVideo> get relatedSongs => _relatedSongs;
+  bool isPlaying(String videoId) => _playingVideoIds.contains(videoId);
 
   SearchProvider() {
     _loadCache();
   }
-
   List<YoutubeMusicVideo> _getFilteredResults() {
     switch (_currentFilter) {
       case SearchFilter.songs:
@@ -72,7 +73,6 @@ class SearchProvider with ChangeNotifier {
       case SearchFilter.albums:
         return _results.where((result) => result.isAlbum).toList();
       case SearchFilter.all:
-      default:
         return _results;
     }
   }
@@ -113,6 +113,15 @@ class SearchProvider with ChangeNotifier {
 
   void updateRelatedSongs(List<YoutubeMusicVideo> songs) {
     _relatedSongs = songs;
+    notifyListeners();
+  }
+
+  void setPlayingState(String videoId, bool isPlaying) {
+    if (isPlaying) {
+      _playingVideoIds.add(videoId);
+    } else {
+      _playingVideoIds.remove(videoId);
+    }
     notifyListeners();
   }
 
