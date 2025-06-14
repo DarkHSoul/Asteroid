@@ -261,7 +261,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 builder: (context, scrollController) {
                   final double chevronTurns =
                       _sheetController.isAttached && _sheetController.size < 0.5 ? 0.5 : 0.0;
-                  final media = MediaQuery.of(context);
                   return SafeArea(
                     top: true,
                     child: Container(

@@ -2,9 +2,6 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:logging/logging.dart';
-import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:asteroid/api/youtube_dl_service.dart';
 import 'package:asteroid/api/youtube_music_api.dart';
 import 'package:asteroid/api/youtube_service.dart';
@@ -33,13 +30,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Stream<List<MediaItem>> get nextSongsStream => _nextSongsController.stream;
   List<MediaItem> get latestSimilarSongs => _latestSimilarSongs;
   final YouTubeService _youtubeService = YouTubeService();
-
   // Add a position stream for real-time updates
   Stream<Duration> get positionStream => _player.positionStream;
-
-  // Add state to track last similar fetch
-  String? _lastSimilarFetchVideoId;
-  bool _lastSimilarFetchWasEmpty = false;
 
   MediaItem? _sessionFirstSong; // first track started this session
   MediaItem? get sessionFirstSong => _sessionFirstSong;
@@ -264,9 +256,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
                final List<MediaItem> fullUpNextList = [mediaItem];
                _latestSimilarSongs = fullUpNextList;
                _nextSongsController.add(fullUpNextList);
-            }
-            // _logger.info('[NEXT API] (addQueueItem) Similar songs found: ' + nextMediaItems.length.toString());
-            for (final item in nextMediaItems) {
+            }            // _logger.info('[NEXT API] (addQueueItem) Similar songs found: ' + nextMediaItems.length.toString());
+            for (final _ in nextMediaItems) {
               // _logger.info('[NEXT API] (addQueueItem)   - ' + item.title + ' (' + item.id + ')');
             }
             if (nextMediaItems.isNotEmpty) {
@@ -274,8 +265,6 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
               // debug print removed
             }
             // Cache fetch result to avoid duplicate network calls when the track starts playing
-            _lastSimilarFetchVideoId = videoId;
-            _lastSimilarFetchWasEmpty = nextMediaItems.isEmpty;
           }
         } catch (e) {
           _logger.warning('Error prefetching similar songs: $e');
@@ -397,11 +386,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
                     _logger.warning('Error using YT-DLP service for $videoId: $e');
                     // If fetching fails, skip this song.
                     continue;
-                }
-            } else {
+                }            } else {
                // If it's not a YouTube video ID, assume the URL is already playable
                streamUrl = item.extras?['url'] as String? ?? item.id;
-               if (streamUrl == null || streamUrl.isEmpty) {
+               if (streamUrl.isEmpty) {
                    _logger.warning('Skipping item with no videoId or URL: ${item.title}');
                    continue;
                }
@@ -501,13 +489,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   Future<void> clearAndPlay(MediaItem mediaItem, {bool resetSimilar = true}) async {
     try {
-      _logger.info('clearAndPlay called');
-
-      if (resetSimilar) {
+      _logger.info('clearAndPlay called');      if (resetSimilar) {
         // Reset cached similar-songs information so a brand-new Up Next list is fetched for this track
         _latestSimilarSongs = [];
-        _lastSimilarFetchVideoId = null;
-        _lastSimilarFetchWasEmpty = false;
       }
 
       // Ensure we have a playable URL
@@ -531,17 +515,12 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
       await _player.stop();
       await _playlist.clear();
-      queue.add([]);
-      // Reset player source – prefetch similar songs only when we reset the list.
+      queue.add([]);      // Reset player source – prefetch similar songs only when we reset the list.
       await addQueueItem(mediaItem, prefetchSimilarSongs: resetSimilar);
       await play();
       // Log benzer şarkılar
-      final videoId = mediaItem.extras?['videoId'] as String? ?? _extractYouTubeVideoId(mediaItem.extras?['url'] as String? ?? mediaItem.id);
-      final playlistId = mediaItem.extras?['playlistId'] as String?;
-      final params = mediaItem.extras?['params'] as String?;
-      // _logger.info('[NEXT API] (clearAndPlay) Song started. videoId: ' + (videoId ?? 'null') + ', playlistId: ' + (playlistId ?? 'null') + ', params: ' + (params ?? 'null'));
       // _logger.info('[NEXT API] (clearAndPlay) Latest similar songs: ' + _latestSimilarSongs.length.toString());
-      for (final item in _latestSimilarSongs) {
+      for (final _ in _latestSimilarSongs) {
         // _logger.info('[NEXT API] (clearAndPlay)   - ' + item.title + ' (' + item.id + ')');
       }
 
