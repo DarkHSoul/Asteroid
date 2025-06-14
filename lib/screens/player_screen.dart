@@ -2,6 +2,9 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:asteroid/audio_handler.dart';
+import 'package:asteroid/providers/queue_provider.dart';
+import 'package:asteroid/providers/library_provider.dart';
+import 'package:asteroid/widgets/player/player_controls.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
@@ -179,69 +182,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             Text(mediaItem.title, style: Theme.of(context).textTheme.headlineSmall),
                             Text(mediaItem.artist ?? '', style: Theme.of(context).textTheme.titleMedium),
                             const SizedBox(height: 20),
-                            StreamBuilder<Duration>(
-                              stream: myAudioHandler.positionStream,
-                              builder: (context, posSnapshot) {
-                                final position = posSnapshot.data ?? Duration.zero;
-                                Duration duration = mediaItem.duration ?? Duration.zero;
-                                String formatDuration(Duration d) {
-                                  String twoDigits(int n) => n.toString().padLeft(2, '0');
-                                  String twoDigitMinutes = twoDigits(d.inMinutes.remainder(60));
-                                  String twoDigitSeconds = twoDigits(d.inSeconds.remainder(60));
-                                  return "${d.inHours > 0 ? '${d.inHours}:' : ''}$twoDigitMinutes:$twoDigitSeconds";
-                                }
-                                return Column(
-                                  children: [
-                                    Slider(
-                                      value: position.inSeconds.toDouble().clamp(0, duration.inSeconds > 0 ? duration.inSeconds.toDouble() : 1),
-                                      min: 0,
-                                      max: duration.inSeconds > 0 ? duration.inSeconds.toDouble() : 1,
-                                      onChanged: (value) {
-                                        audioHandler.seek(Duration(seconds: value.toInt()));
-                                      },
-                                    ),
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text(formatDuration(position)),
-                                        Text(formatDuration(duration)),
-                                      ],
-                                    ),
-                                  ],
-                                );
-                              },
+                            PlayerControls(
+                              size: 1.2,
+                              showLabels: true,
                             ),
-                            StreamBuilder<PlaybackState>(
-                                stream: audioHandler.playbackState,
-                                builder: (context, snapshot) {
-                                  final isPlaying = snapshot.data?.playing ?? false;
-                                  return Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(Icons.skip_previous),
-                                        onPressed: audioHandler.skipToPrevious,
-                                        iconSize: 48,
-                                      ),
-                                      IconButton(
-                                        icon: Icon(isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled),
-                                        onPressed: () {
-                                          if (isPlaying) {
-                                            audioHandler.pause();
-                                          } else {
-                                            audioHandler.play();
-                                          }
-                                        },
-                                        iconSize: 64,
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.skip_next),
-                                        onPressed: audioHandler.skipToNext,
-                                        iconSize: 48,
-                                      ),
-                                    ],
-                                  );
-                                }),
                             const SizedBox(height: 24),
                           ],
                         ),
@@ -284,65 +228,82 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ),
                           if (!_isCollapsed) const SliverToBoxAdapter(child: Divider(height: 1)),
                           if (!_isCollapsed)
-                            StreamBuilder<List<MediaItem>>(
-                              stream: nextSongsStream,
-                              initialData: myAudioHandler.latestSimilarSongs,
-                              builder: (context, snap) {
-                                List<MediaItem> list = snap.data ?? [];
-
-                                // Show progress while waiting for the first response
-                                if (snap.connectionState == ConnectionState.waiting && list.isEmpty) {
+                            Consumer<QueueProvider>(
+                              builder: (context, queueProvider, child) {
+                                final queue = queueProvider.queue;
+                                
+                                if (queue.isEmpty) {
                                   return const SliverFillRemaining(
                                     hasScrollBody: false,
-                                    child: Center(child: CircularProgressIndicator()),
-                                  );
-                                }
-
-                                if (list.isEmpty) {
-                                  return SliverFillRemaining(
-                                    hasScrollBody: false,
                                     child: Center(
-                                      child: Text('No similar songs', style: Theme.of(context).textTheme.bodyMedium),
+                                      child: Text('Queue is empty'),
                                     ),
                                   );
                                 }
 
-                                return SliverList.separated(
-                                  itemCount: list.length,
-                                  separatorBuilder: (_, __) => const Divider(height: 1),
-                                  itemBuilder: (_, index) {
-                                    final song = list[index];
+                                return SliverList.builder(
+                                  itemCount: queue.length,
+                                  itemBuilder: (context, index) {
+                                    final song = queue[index];
                                     final bool isCurrent = song.id == mediaItem.id;
-                                    return ListTile(
-                                      leading: song.artUri != null
-                                          ? ClipRRect(
-                                              borderRadius: BorderRadius.circular(6),
-                                              child: Image.network(
-                                                song.artUri.toString(),
-                                                width: 48,
-                                                height: 48,
-                                                fit: BoxFit.cover,
-                                              ),
-                                            )
-                                          : const Icon(Icons.music_note, size: 48),
-                                      title: Text(
-                                        song.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: isCurrent ? TextStyle(color: Theme.of(context).colorScheme.primary) : null,
+                                    
+                                    return Dismissible(
+                                      key: Key(song.id),
+                                      direction: DismissDirection.endToStart,
+                                      background: Container(
+                                        alignment: Alignment.centerRight,
+                                        padding: const EdgeInsets.only(right: 20),
+                                        color: Colors.red,
+                                        child: const Icon(
+                                          Icons.delete_outline,
+                                          color: Colors.white,
+                                        ),
                                       ),
-                                      subtitle: Text(
-                                        song.artist ?? '',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
+                                      onDismissed: (_) => queueProvider.removeItem(index),
+                                      child: ListTile(
+                                        leading: ClipRRect(
+                                          borderRadius: BorderRadius.circular(6),
+                                          child: song.artUri != null
+                                              ? Image.network(
+                                                  song.artUri.toString(),
+                                                  width: 48,
+                                                  height: 48,
+                                                  fit: BoxFit.cover,
+                                                )
+                                              : Container(
+                                                  width: 48,
+                                                  height: 48,
+                                                  color: Theme.of(context)
+                                                      .primaryColor
+                                                      .withOpacity(0.1),
+                                                  child: const Icon(Icons.music_note),
+                                                ),
+                                        ),
+                                        title: Text(
+                                          song.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: isCurrent
+                                              ? TextStyle(
+                                                  color: Theme.of(context).primaryColor,
+                                                  fontWeight: FontWeight.bold,
+                                                )
+                                              : null,
+                                        ),
+                                        subtitle: Text(
+                                          song.artist ?? '',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        trailing: ReorderableDragStartListener(
+                                          index: index,
+                                          child: const Icon(Icons.drag_handle),
+                                        ),
+                                        onTap: () async {
+                                          await audioHandler.skipToQueueItem(index);
+                                          await audioHandler.play();
+                                        },
                                       ),
-                                      selected: isCurrent,
-                                      selectedTileColor: Theme.of(context).colorScheme.primary.withOpacity(0.08),
-                                      onTap: () async {
-                                        await myAudioHandler.playMediaItem(song);
-                                        // Ensure the list remains unchanged after playing a song
-                                        setState(() {});
-                                      },
                                     );
                                   },
                                 );

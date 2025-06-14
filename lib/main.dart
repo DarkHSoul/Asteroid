@@ -1,6 +1,9 @@
 import 'package:asteroid/audio_handler.dart';
 import 'package:asteroid/providers/theme_provider.dart';
 import 'package:asteroid/providers/search_provider.dart';
+import 'package:asteroid/providers/library_provider.dart';
+import 'package:asteroid/providers/queue_provider.dart';
+import 'package:asteroid/providers/settings_provider.dart';
 import 'package:asteroid/screens/home_screen.dart';
 import 'package:asteroid/screens/player_screen.dart';
 import 'package:asteroid/screens/search_screen.dart';
@@ -23,7 +26,14 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider(create: (context) => ThemeProvider()),
         ChangeNotifierProvider(create: (context) => SearchProvider()),
+        ChangeNotifierProvider(create: (context) => LibraryProvider()),
+        ChangeNotifierProvider(create: (context) => SettingsProvider()),
         Provider<AudioHandler>.value(value: _audioHandler),
+        ChangeNotifierProxyProvider<AudioHandler, QueueProvider>(
+          create: (context) => QueueProvider(_audioHandler),
+          update: (context, audioHandler, previous) => 
+            previous ?? QueueProvider(audioHandler),
+        ),
       ],
       child: const MyApp(),
     ),
