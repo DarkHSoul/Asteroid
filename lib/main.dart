@@ -1,9 +1,11 @@
+import 'package:asteroid/api/youtube_api_service.dart';
 import 'package:asteroid/audio_handler.dart';
 import 'package:asteroid/providers/theme_provider.dart';
 import 'package:asteroid/providers/search_provider.dart';
 import 'package:asteroid/providers/library_provider.dart';
 import 'package:asteroid/providers/queue_provider.dart';
 import 'package:asteroid/providers/settings_provider.dart';
+import 'package:asteroid/providers/up_next_provider.dart';
 import 'package:asteroid/screens/home_screen.dart';
 import 'package:asteroid/screens/player_screen.dart';
 import 'package:asteroid/screens/search_screen.dart';
@@ -20,7 +22,9 @@ Future<void> main() async {
     print('${record.level.name}: ${record.time}: ${record.loggerName}: ${record.message}');
   });
   WidgetsFlutterBinding.ensureInitialized();
+
   _audioHandler = await initAudioService();
+  final upNextNotifier = UpNextNotifier(_audioHandler as MyAudioHandler);
   runApp(
     MultiProvider(
       providers: [
@@ -28,11 +32,12 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (context) => SearchProvider()),
         ChangeNotifierProvider(create: (context) => LibraryProvider()),
         ChangeNotifierProvider(create: (context) => SettingsProvider()),
+        ChangeNotifierProvider.value(value: upNextNotifier),
         Provider<AudioHandler>.value(value: _audioHandler),
         ChangeNotifierProxyProvider<AudioHandler, QueueProvider>(
           create: (context) => QueueProvider(_audioHandler),
-          update: (context, audioHandler, previous) => 
-            previous ?? QueueProvider(audioHandler),
+          update: (context, audioHandler, previous) =>
+              previous ?? QueueProvider(audioHandler),
         ),
       ],
       child: const MyApp(),

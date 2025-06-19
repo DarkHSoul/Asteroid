@@ -2,9 +2,40 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:asteroid/providers/queue_provider.dart';
+import 'package:asteroid/providers/up_next_provider.dart';
+import 'package:asteroid/audio_handler.dart';
 
-class QueueSheet extends StatelessWidget {
+class QueueSheet extends StatefulWidget {
   const QueueSheet({super.key});
+
+  @override
+  State<QueueSheet> createState() => _QueueSheetState();
+}
+
+class _QueueSheetState extends State<QueueSheet> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      final upNextProvider = context.read<UpNextNotifier>();
+      if (upNextProvider.canLoadMore && !upNextProvider.isLoadingMore) {
+        upNextProvider.loadMoreUpNextItems();
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,9 +113,13 @@ class QueueSheet extends StatelessWidget {
               ),
               // Queue list
               Expanded(
-                child: Consumer<QueueProvider>(
-                  builder: (context, queueProvider, child) {
-                    final queue = queueProvider.queue;
+                child: Consumer<UpNextNotifier>(
+                  builder: (context, upNextProvider, child) {
+                    if (upNextProvider.isLoading) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    final queue = upNextProvider.videos;
 
                     if (queue.isEmpty) {
                       return Center(
@@ -113,69 +148,60 @@ class QueueSheet extends StatelessWidget {
                         return StreamBuilder<MediaItem?>(
                           stream: audioHandler.mediaItem,
                           builder: (context, snapshot) {
-                            final currentItem = snapshot.data;                            return ReorderableListView.builder(
-                              onReorder: queueProvider.moveItem,
-                              itemCount: queue.length,
+                            final currentItem = snapshot.data;
+                            return ListView.builder(
+                              controller: _scrollController,
+                              itemCount: queue.length + (upNextProvider.isLoadingMore ? 1 : 0),
                               itemBuilder: (context, index) {
-                                final item = queue[index];
-                                final isPlaying = currentItem?.id == item.id;
+                                if (index == queue.length) {
+                                  return const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16.0),
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  );
+                                }
 
-                                return Dismissible(
-                                  key: Key(item.id),
-                                  direction: DismissDirection.endToStart,
-                                  background: Container(
-                                    alignment: Alignment.centerRight,
-                                    padding: const EdgeInsets.only(right: 20),
-                                    color: Colors.red,
-                                    child: const Icon(
-                                      Icons.delete_outline,
-                                      color: Colors.white,
+                                final item = queue[index];
+                                final isPlaying = currentItem?.id == (item.extras?['videoId'] as String?);
+
+                                return ListTile(
+                                  leading: ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: (item.extras?['thumbnailUrl'] as String? ?? '').isNotEmpty
+                                        ? Image.network(
+                                            item.extras!['thumbnailUrl'] as String,
+                                            width: 40,
+                                            height: 40,
+                                            fit: BoxFit.cover,
+                                          )
+                                        : Container(
+                                            width: 40,
+                                            height: 40,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary
+                                                .withOpacity(0.1),
+                                            child: const Icon(Icons.music_note),
+                                          ),
+                                  ),
+                                  title: Text(
+                                    item.title ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontWeight:
+                                          isPlaying ? FontWeight.bold : null,
                                     ),
                                   ),
-                                  onDismissed: (_) => queueProvider.removeItem(index),
-                                  child: ListTile(
-                                    leading: ClipRRect(
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: item.artUri != null
-                                          ? Image.network(
-                                              item.artUri.toString(),
-                                              width: 40,
-                                              height: 40,
-                                              fit: BoxFit.cover,
-                                            )
-                                          : Container(
-                                              width: 40,
-                                              height: 40,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .primary
-                                                  .withOpacity(0.1),
-                                              child: const Icon(Icons.music_note),
-                                            ),
-                                    ),
-                                    title: Text(
-                                      item.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontWeight:
-                                            isPlaying ? FontWeight.bold : null,
-                                      ),
-                                    ),
-                                    subtitle: Text(
-                                      item.artist ?? 'Unknown Artist',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    trailing: ReorderableDragStartListener(
-                                      index: index,
-                                      child: const Icon(Icons.drag_handle),
-                                    ),
-                                    onTap: () async {
-                                      await audioHandler.skipToQueueItem(index);
-                                      await audioHandler.play();
-                                    },
+                                  subtitle: Text(
+                                    item.artist ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
+                                  onTap: () async {
+                                    await (audioHandler as MyAudioHandler).playFromUpNext(index);
+                                  },
                                 );
                               },
                             );

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:asteroid/providers/search_provider.dart';
-import 'package:asteroid/api/youtube_music_api.dart';
+import 'package:asteroid/api/youtube_api_service.dart'; // Updated import
 
 class RelatedSongs extends StatelessWidget {
   final AudioHandler audioHandler;

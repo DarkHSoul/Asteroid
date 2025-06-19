@@ -49,17 +49,19 @@ class PlayerControls extends StatelessWidget {
                                 overlayShape: const RoundSliderOverlayShape(
                                   overlayRadius: 14,
                                 ),
-                                activeTrackColor: Theme.of(context).primaryColor,
+                                activeTrackColor: Theme.of(context).colorScheme.primary, // Use colorScheme.primary
                                 inactiveTrackColor: Theme.of(context)
-                                    .primaryColor
-                                    .withOpacity(0.3),
-                                thumbColor: Theme.of(context).primaryColor,
+                                    .colorScheme
+                                    .onSurface
+                                    .withOpacity(0.3), // Use onSurface for inactive
+                                thumbColor: Theme.of(context).colorScheme.primary, // Use colorScheme.primary
                                 overlayColor: Theme.of(context)
-                                    .primaryColor
-                                    .withOpacity(0.3),
+                                    .colorScheme
+                                    .primary
+                                    .withOpacity(0.3), // Use colorScheme.primary
                               ),
                               child: Slider(
-                                value: position.inMilliseconds.toDouble(),
+                                value: position.inMilliseconds.toDouble().clamp(0.0, duration.inMilliseconds.toDouble()),
                                 max: duration.inMilliseconds.toDouble(),
                                 onChanged: (value) {
                                   audioHandler.seek(

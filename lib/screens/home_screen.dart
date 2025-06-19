@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:asteroid/providers/library_provider.dart';
+import 'package:asteroid/providers/theme_provider.dart';
 import 'package:asteroid/widgets/home/horizontal_section.dart';
 import 'package:asteroid/widgets/home/song_card.dart';
 import 'package:asteroid/widgets/home/playlist_card.dart';
@@ -200,6 +201,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    Provider.of<ThemeProvider>(context); // Ensure HomeScreen rebuilds on theme changes
     return Scaffold(
       appBar: AppBar(
         title: const Text('Asteroid Music'),
