@@ -13,9 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Install Flutter (this adds `flutter` to PATH)
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.1' # adjust version as needed
+          flutter-version: '3.22.1' # Use the version your project needs
+
+      # (Optional) Enable Flutter pre-release or beta channels
+      # - run: flutter channel stable
+      # - run: flutter upgrade
 
       - name: Install dependencies
         run: flutter pub get
@@ -26,6 +31,6 @@ jobs:
       - name: Run tests
         run: flutter test
 
-      # Optional: Enforce formatting
+      # Optional: Format check
       # - name: Verify formatting
       #   run: dart format --output=none --set-exit-if-changed .
