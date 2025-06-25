@@ -11,7 +11,7 @@ enum RepeatMode {
 }
 
 class QueueProvider with ChangeNotifier {
-  final AudioHandler audioHandler;
+  final MyAudioHandler audioHandler;
   List<MediaItem> _queue = [];
   bool _shuffleMode = false;
   RepeatMode _repeatMode = RepeatMode.off;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:asteroid/providers/queue_provider.dart';
+import 'package:asteroid/audio_handler.dart';
 
 class PlayerControls extends StatelessWidget {
   final double size;
@@ -17,7 +18,7 @@ class PlayerControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AudioHandler>(
+    return Consumer<MyAudioHandler>(
       builder: (context, audioHandler, child) {
         return StreamBuilder<PlaybackState>(
           stream: audioHandler.playbackState,

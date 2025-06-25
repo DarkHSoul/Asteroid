@@ -853,6 +853,15 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _logger.info('removeFromUpNext called for id: $id');
   }
 
+  void reorderUpNext(int oldIndex, int newIndex) {
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+    final MediaItem item = _currentUpNextList.removeAt(oldIndex);
+    _currentUpNextList.insert(newIndex, item);
+    _nextSongsController.add(List<MediaItem>.from(_currentUpNextList));
+  }
+
   Future<void> playFromUpNext(int index) async {
     final int currentPlayingIndex = _player.currentIndex ?? -1;
     if (currentPlayingIndex != -1 && index == currentPlayingIndex) {

@@ -11,6 +11,7 @@ import 'package:asteroid/screens/library_screen.dart';
 import 'package:asteroid/screens/search_screen.dart';
 import 'package:asteroid/widgets/player_bar.dart';
 import 'package:asteroid/widgets/app_drawer.dart';
+import 'package:asteroid/audio_handler.dart';
 
 class HomeContent extends StatelessWidget {
   const HomeContent({super.key});
@@ -19,7 +20,7 @@ class HomeContent extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<LibraryProvider>(
       builder: (context, library, child) {
-        return Consumer<AudioHandler>(
+        return Consumer<MyAudioHandler>(
           builder: (context, audioHandler, child) {
             return StreamBuilder<MediaItem?>(
               stream: audioHandler.mediaItem,

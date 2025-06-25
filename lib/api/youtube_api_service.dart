@@ -127,7 +127,21 @@ class YouTubeApiService {
   static const String _nextEndpointPath = '/next';
   static const String _playerEndpointPath = '/player'; // For playback details
 
-  static const String _nodeServerBaseUrl = 'http://localhost:8080/api/youtubei/v1'; // For Web/Windows proxy
+  static final String _proxyBaseUrl = () {
+    if (kIsWeb) {
+      return 'http://localhost:8080';
+    }
+    try {
+      if (Platform.isAndroid) {
+        return 'http://10.0.2.2:8080';
+      }
+    } catch (e) {
+      // Fallback for desktop and other platforms
+    }
+    return 'http://localhost:8080';
+  }();
+
+  static final String _nodeServerBaseUrl = '${_proxyBaseUrl}/api/youtubei/v1'; // For Web/Windows proxy
 
   static const String _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
   static const String _apiKey = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30';
@@ -408,7 +422,7 @@ class YouTubeApiService {
                  duration += (duration.isEmpty ? '' : ' • ') + text; // Store other info like sub count in duration field for artists
               }
             } else { // Song
-              if (!RegExp(r'^\d{1,2}:\d{2}(:\d{2})?$').hasMatch(text)) {
+              if (!RegExp(r'^\d{1,2}:\d{2}(:\d{2})?$').hasMatch(text) && text.toLowerCase() != title.toLowerCase()) {
                 artistParts.add(text);
               } else {
                 duration = text;
@@ -417,7 +431,7 @@ class YouTubeApiService {
           }
         }
         if (artistParts.isNotEmpty) {
-          artist = artistParts.join(' / ');
+          artist = artistParts.join(', ');
         }
         
         if (isItemAlbum) { // For albums, duration field will store year and track count
@@ -433,12 +447,12 @@ class YouTubeApiService {
         thumbnailUrl = 'https:$thumbnailUrl';
       }
 
-      if (kIsWeb && thumbnailUrl.isNotEmpty) {
+      if (_shouldUseProxy && thumbnailUrl.isNotEmpty) {
         try {
           // Ensure the URL is valid before trying to encode it
           Uri.parse(thumbnailUrl); // This will throw if the URL is invalid
-          thumbnailUrl = 'http://localhost:8080/api/image-proxy?url=${Uri.encodeComponent(thumbnailUrl)}';
-          _logger.finer('Using proxied thumbnail URL for web: $thumbnailUrl');
+          thumbnailUrl = '${_proxyBaseUrl}/api/image-proxy?url=${Uri.encodeComponent(thumbnailUrl)}';
+          _logger.finer('Using proxied thumbnail URL: $thumbnailUrl');
         } catch (e) {
           _logger.warning('Invalid thumbnail URL, cannot proxy: ${renderer['thumbnail']?['musicThumbnailRenderer']?['thumbnail']?['thumbnails']?.last?['url'] ?? ''} - Error: $e');
           thumbnailUrl = ''; // Set to empty if invalid to avoid further errors
@@ -636,10 +650,10 @@ class YouTubeApiService {
         final thumbList = videoRenderer['thumbnail']?['thumbnails'] as List?;
         if (thumbList != null && thumbList.isNotEmpty) {
           thumbnailUrl = thumbList.last['url'] as String? ?? '';
-           if (kIsWeb && thumbnailUrl.isNotEmpty) {
+           if (_shouldUseProxy && thumbnailUrl.isNotEmpty) {
             try {
               Uri.parse(thumbnailUrl); 
-              thumbnailUrl = 'http://localhost:8080/api/image-proxy?url=${Uri.encodeComponent(thumbnailUrl)}';
+              thumbnailUrl = '${_proxyBaseUrl}/api/image-proxy?url=${Uri.encodeComponent(thumbnailUrl)}';
             } catch (e) {
               _logger.warning('Invalid thumbnail URL for proxy in _parseNextResponse: $thumbnailUrl - Error: $e');
               thumbnailUrl = ''; 
@@ -698,60 +712,46 @@ class YouTubeApiService {
         return null;
       }
 
-      if (kIsWeb) {
-        // For web, use the proxy server's stream endpoint
-        final String proxyStreamUrl = 'http://localhost:8080/api/stream/$videoId';
-        _logger.info('Using proxied stream URL for web: $proxyStreamUrl');
-        // Basic validation for the proxy URL structure
-        try {
-          Uri.parse(proxyStreamUrl); // Check if it's a valid URI
-          return proxyStreamUrl;
-        } catch (e) {
-          _logger.severe('Generated proxy stream URL is invalid: $proxyStreamUrl. Error: $e');
-          return null;
-        }
-      } else {
-        // For non-web platforms, use YoutubeDLService
-        _logger.info('Getting streaming URL for video ID: $videoId using YoutubeDLService (non-web)');
-        final youtubeDLService = YoutubeDLService();
-        String? url;
-        try {
-          url = await youtubeDLService.getStreamUrl(videoId);
-        } catch (e) {
-          _logger.warning('Error using YoutubeDLService: $e');
-        }
-        if (url == null) {
-          _logger.warning('Could not get streaming URL for video ID: $videoId from YoutubeDLService');
-          return null;
-        }
-        // URL validation and fixing logic from original implementation
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-          _logger.warning('Invalid URL format from YoutubeDLService: $url');
-          if (url.startsWith('//')) {
-            url = 'https:$url';
-            _logger.info('Fixed URL by adding https: scheme');
-          } else if (url.startsWith('/')) {
-            // This case might be problematic if _musicApiDomain is not the correct host for the stream
-            url = 'https://$_musicApiDomain$url'; 
-            _logger.info('Fixed URL by adding https://$_musicApiDomain scheme');
-          } else {
-            url = 'https://$url';
-            _logger.info('Fixed URL by adding https:// scheme');
-          }
-        }
-        try {
-          final uri = Uri.parse(url);
-          if (uri.scheme.isEmpty || (!uri.scheme.startsWith('http'))) {
-            throw Exception('Invalid URL scheme after fix: ${uri.scheme}');
-          }
-          _logger.info('Validated stream URL: scheme=${uri.scheme}, host=${uri.host}');
-        } catch (e) {
-          _logger.severe('Stream URL validation failed after potential fix: $e. Original URL from service: $url');
-          return null;
-        }
-        _logger.info('Successfully obtained and validated streaming URL for video ID: $videoId (non-web)');
-        return url;
+      // For non-web platforms, use YoutubeDLService
+      _logger.info('Getting streaming URL for video ID: $videoId using YoutubeDLService (non-web)');
+      final youtubeDLService = YoutubeDLService();
+      String? url;
+      try {
+        url = await youtubeDLService.getStreamUrl(videoId);
+      } catch (e) {
+        _logger.warning('Error using YoutubeDLService: $e');
       }
+      if (url == null) {
+        _logger.warning('Could not get streaming URL for video ID: $videoId from YoutubeDLService');
+        return null;
+      }
+      // URL validation and fixing logic from original implementation
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        _logger.warning('Invalid URL format from YoutubeDLService: $url');
+        if (url.startsWith('//')) {
+          url = 'https:$url';
+          _logger.info('Fixed URL by adding https: scheme');
+        } else if (url.startsWith('/')) {
+          // This case might be problematic if _musicApiDomain is not the correct host for the stream
+          url = 'https://$_musicApiDomain$url'; 
+          _logger.info('Fixed URL by adding https://$_musicApiDomain scheme');
+        } else {
+          url = 'https://$url';
+          _logger.info('Fixed URL by adding https:// scheme');
+        }
+      }
+      try {
+        final uri = Uri.parse(url);
+        if (uri.scheme.isEmpty || (!uri.scheme.startsWith('http'))) {
+          throw Exception('Invalid URL scheme after fix: ${uri.scheme}');
+        }
+        _logger.info('Validated stream URL: scheme=${uri.scheme}, host=${uri.host}');
+      } catch (e) {
+        _logger.severe('Stream URL validation failed after potential fix: $e. Original URL from service: $url');
+        return null;
+      }
+      _logger.info('Successfully obtained and validated streaming URL for video ID: $videoId (non-web)');
+      return url;
     } catch (e, stackTrace) {
       _logger.severe('Error in getStreamingUrl (YouTubeApiService): $e', e, stackTrace);
       return null;

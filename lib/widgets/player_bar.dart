@@ -11,8 +11,8 @@ class PlayerBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final audioHandler = Provider.of<AudioHandler>(context);
-    final myAudioHandler = audioHandler as MyAudioHandler;
+    final audioHandler = Provider.of<MyAudioHandler>(context);
+    final myAudioHandler = audioHandler;
     return StreamBuilder<List<MediaItem>>(
       stream: audioHandler.queue,
       builder: (context, queueSnapshot) {
@@ -132,7 +132,7 @@ class PlayerBar extends StatelessWidget {
 }
 
 class _PlayerControls extends StatelessWidget {
-  final AudioHandler audioHandler;
+  final MyAudioHandler audioHandler;
   final bool hasPrevious;
   final bool hasNext;
   final int? previousIndex;

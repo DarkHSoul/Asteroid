@@ -8,6 +8,7 @@ enum SearchFilter {
   songs,
   artists,
   albums,
+  playlists,
 }
 
 // class CachedSearch { // Removed
@@ -65,13 +66,16 @@ class SearchProvider with ChangeNotifier {
   //   // _loadCache();
   // }
   List<YoutubeMusicVideo> _getFilteredResults() {
+    debugPrint('Filtering results with filter: $_currentFilter');
     switch (_currentFilter) {
       case SearchFilter.songs:
-        return _results.where((result) => !result.isArtist && !result.isAlbum).toList();
+        return _results.where((result) => !result.isArtist && !result.isAlbum && !result.isPlaylist).toList();
       case SearchFilter.artists:
         return _results.where((result) => result.isArtist).toList();
       case SearchFilter.albums:
         return _results.where((result) => result.isAlbum).toList();
+      case SearchFilter.playlists:
+        return _results.where((result) => result.isPlaylist).toList();
       case SearchFilter.all:
         return _results;
     }

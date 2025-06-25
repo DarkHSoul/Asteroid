@@ -44,8 +44,8 @@ dependencies:
   cached_network_image: ^3.3.1
   connectivity_plus: ^5.0.2
   shared_preferences: ^2.2.2
-  youtube_explode_dart: ^2.2.0
   dio: ^5.4.0
+  youtube_explode_dart: ^2.2.0
   
 
 dev_dependencies:
@@ -74,6 +74,7 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/
+    - assets/youtube_dl_script.py
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

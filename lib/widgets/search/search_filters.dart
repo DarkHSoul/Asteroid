@@ -37,6 +37,12 @@ class SearchFilters extends StatelessWidget {
                 selected: searchProvider.currentFilter == SearchFilter.albums,
                 onSelected: (_) => searchProvider.setFilter(SearchFilter.albums),
               ),
+              const SizedBox(width: 8),
+              _FilterChip(
+                label: 'Playlists',
+                selected: searchProvider.currentFilter == SearchFilter.playlists,
+                onSelected: (_) => searchProvider.setFilter(SearchFilter.playlists),
+              ),
             ],
           ),
         );
@@ -61,7 +67,10 @@ class _FilterChip extends StatelessWidget {
     return FilterChip(
       label: Text(label),
       selected: selected,
-      onSelected: onSelected,
+      onSelected: (selected) {
+        debugPrint('Filter selected: $label');
+        onSelected(selected);
+      },
       showCheckmark: false,
       labelStyle: TextStyle(
         color: selected ? Colors.white : Theme.of(context).textTheme.bodyLarge?.color,

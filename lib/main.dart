@@ -19,6 +19,9 @@ late AudioHandler _audioHandler;
 Future<void> main() async {
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
+    if (record.loggerName == 'JSEngine') {
+      return;
+    }
     print('${record.level.name}: ${record.time}: ${record.loggerName}: ${record.message}');
   });
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,11 +36,12 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (context) => LibraryProvider()),
         ChangeNotifierProvider(create: (context) => SettingsProvider()),
         ChangeNotifierProvider.value(value: upNextNotifier),
-        Provider<AudioHandler>.value(value: _audioHandler),
+        Provider<AudioHandler>.value(value: _audioHandler), // Provide AudioHandler
+        Provider<MyAudioHandler>.value(value: _audioHandler as MyAudioHandler), // Also provide MyAudioHandler
         ChangeNotifierProxyProvider<AudioHandler, QueueProvider>(
-          create: (context) => QueueProvider(_audioHandler),
-          update: (context, audioHandler, previous) =>
-              previous ?? QueueProvider(audioHandler),
+          create: (context) => QueueProvider(_audioHandler as MyAudioHandler),
+          update: (context, audioHandler, previous) => // audioHandler is AudioHandler
+              previous ?? QueueProvider(audioHandler as MyAudioHandler), // Cast to MyAudioHandler
         ),
       ],
       child: const MyApp(),
