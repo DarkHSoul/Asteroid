@@ -13,14 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Install Flutter (this adds `flutter` to PATH)
+      # Install latest Flutter from the master channel
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.1' # Use the version your project needs
+          channel: master  # or beta if that's more stable for your needs
 
-      # (Optional) Enable Flutter pre-release or beta channels
-      # - run: flutter channel stable
-      # - run: flutter upgrade
+      - name: Flutter version check
+        run: flutter --version  # Confirm Dart version is >= 3.8.1
 
       - name: Install dependencies
         run: flutter pub get
@@ -30,7 +29,3 @@ jobs:
 
       - name: Run tests
         run: flutter test
-
-      # Optional: Format check
-      # - name: Verify formatting
-      #   run: dart format --output=none --set-exit-if-changed .
