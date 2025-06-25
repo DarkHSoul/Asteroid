@@ -13,6 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -43,3 +44,18 @@ jobs:
         with:
           name: release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+      # Install latest Flutter from the master channel
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: master  # or beta if that's more stable for your needs
+
+      - name: Flutter version check
+        run: flutter --version  # Confirm Dart version is >= 3.8.1
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      
+      - name: Run tests
+        run: flutter test
+

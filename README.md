@@ -1,6 +1,3 @@
-
-Built by https://www.blackbox.ai
-
 ---
 
 # Asteroid
@@ -14,7 +11,7 @@ To get started with Asteroid, follow these steps:
 1. **Clone the Repository:**
 
    ```bash
-   git clone https://github.com/your-username/asteroid.git
+   git clone https://github.com/DarkHSoul/asteroid.git
    cd asteroid
    ```
 
