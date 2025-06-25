@@ -76,7 +76,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
         // Determine SystemUiOverlayStyle based on AppBar's effective background color
         final ThemeData currentTheme = Theme.of(context);
-        final AppBarTheme appBarTheme = currentTheme.appBarTheme;
+        var appBarTheme = currentTheme.appBarTheme;
         final Color appBarEffectiveBackgroundColor;
 
         if (appBarTheme.backgroundColor != null) {

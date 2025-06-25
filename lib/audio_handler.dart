@@ -18,7 +18,7 @@ Future<AudioHandler> initAudioService() async {
 }
 
 class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
-  final _player = AudioPlayer();
+  final player = AudioPlayer();
   final _playlist = ConcatenatingAudioSource(children: []);
   final _logger = Logger('AudioHandler');
   
@@ -45,7 +45,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
   List<MediaItem> get latestSimilarSongs => _allFetchedSimilarSongs;
   final YouTubeApiService youtubeApiService = YouTubeApiService();
-  Stream<Duration> get positionStream => _player.positionStream;
+  Stream<Duration> get positionStream => player.positionStream;
   MediaItem? _sessionFirstSong;
   MediaItem? get sessionFirstSong => _sessionFirstSong;
   
@@ -69,14 +69,14 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _initializePlayer();
   }
   void _listenForSettingsChanges() {
-    _player.volumeStream.listen((volume) {
+    player.volumeStream.listen((volume) {
       _logger.info('Volume changed to: $volume');
     });
   }
 
   void _notifyAudioHandlerAboutPlaybackEvents() {
-    _player.playbackEventStream.listen((PlaybackEvent event) {
-      final playing = _player.playing;
+    player.playbackEventStream.listen((PlaybackEvent event) {
+      final playing = player.playing;
       playbackState.add(playbackState.value.copyWith(
         controls: [
           MediaControl.skipToPrevious,
@@ -93,19 +93,19 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
           ProcessingState.buffering: AudioProcessingState.buffering,
           ProcessingState.ready: AudioProcessingState.ready,
           ProcessingState.completed: AudioProcessingState.completed,
-        }[_player.processingState]!,
+        }[player.processingState]!,
         playing: playing,
-        updatePosition: _player.position,
-        bufferedPosition: _player.bufferedPosition,
-        speed: _player.speed,
+        updatePosition: player.position,
+        bufferedPosition: player.bufferedPosition,
+        speed: player.speed,
         queueIndex: event.currentIndex,
       ));
     });
   }
 
   void _listenForDurationChanges() {
-    _player.durationStream.listen((duration) {
-      final index = _player.currentIndex;
+    player.durationStream.listen((duration) {
+      final index = player.currentIndex;
       final newQueue = queue.value;
       if (index == null || newQueue.isEmpty) return;
       final oldMediaItem = newQueue[index];
@@ -117,7 +117,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   void _listenForCurrentSongIndexChanges() {
-    _player.currentIndexStream.listen((index) {
+    player.currentIndexStream.listen((index) {
       final playlist = queue.value;
       if (index == null || playlist.isEmpty || index >= playlist.length) return;
       
@@ -135,7 +135,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   void _listenForSequenceStateChanges() {
-    _player.sequenceStateStream.listen((SequenceState? sequenceState) {
+    player.sequenceStateStream.listen((SequenceState? sequenceState) {
       final sequence = sequenceState?.effectiveSequence;
       if (sequence == null || sequence.isEmpty) return;
       final items = sequence.map((source) => source.tag as MediaItem).toList();
@@ -144,7 +144,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   void _listenForProcessingStateChanges() {
-    _player.processingStateStream.listen((state) async {
+    player.processingStateStream.listen((state) async {
       if (state == ProcessingState.completed) {
         await skipToNext();
       }
@@ -154,7 +154,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> _initializePlayer() async {
     try {
       if (_playlist.length > 0) {
-        await _player.setAudioSource(_playlist);
+        await player.setAudioSource(_playlist);
         _logger.info('Audio player initialized with non-empty playlist.');
       } else {
         _logger.info('Audio player configured (initial playlist is empty, source will be set on first item add).');
@@ -240,9 +240,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       queue.add(newQueue);
       _logger.info('Added to queue successfully, queue size: ${newQueue.length}');
       
-      if (_player.audioSource == null || (_playlist.length == 1 && _player.audioSource != _playlist)) {
+      if (player.audioSource == null || (_playlist.length == 1 && player.audioSource != _playlist)) {
         _logger.info('Playlist has content, (re)setting audio source in player.');
-        await _player.setAudioSource(_playlist);
+        await player.setAudioSource(_playlist);
         _logger.info('Player (re)initialized with playlist.');
       }
       print('[UP-NEXT DEBUG] addQueueItem called with prefetchSimilarSongs: $prefetchSimilarSongs');
@@ -362,17 +362,17 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         return;
       }
       
-      if (_player.audioSource == null) {
+      if (player.audioSource == null) {
         print('[DEBUG] play() - Player not initialized, setting audio source');
         _logger.info('Player not initialized, setting audio source');
-        await _player.setAudioSource(_playlist);
+        await player.setAudioSource(_playlist);
         _logger.info('Player initialized with playlist');
         print('[DEBUG] play() - Player initialized with playlist');
       }
       
       print('[DEBUG] play() - Starting playback...');
       _logger.info('Starting playback');
-      await _player.play();
+      await player.play();
       _logger.info('Playback started successfully');
       print('[DEBUG] play() - Playback started successfully');
     } catch (e, stackTrace) {
@@ -385,15 +385,15 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> pause() async {
-    _player.pause();
+    player.pause();
   }
 
   @override
   Future<void> seek(Duration position) async {
-    await _player.pause();
-    await _player.seek(position);
+    await player.pause();
+    await player.seek(position);
     await Future.delayed(const Duration(milliseconds: 300));
-    await _player.play();
+    await player.play();
   }
 
   @override
@@ -403,16 +403,16 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       return;
     }
 
-    final bool wasPlaying = _player.playing;
+    final bool wasPlaying = player.playing;
 
     if (wasPlaying) {
-      await _player.pause();
+      await player.pause();
     }
 
-    await _player.seek(Duration.zero, index: index);
+    await player.seek(Duration.zero, index: index);
 
     if (wasPlaying) {
-      await _player.play();
+      await player.play();
     }
   }
 
@@ -424,19 +424,19 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       _logger.info('[SKIP NEXT DEBUG] skipToNext called.');
       final int playerQueueLengthBeforeAdd = _playlist.length;
 
-      if (_player.hasNext) {
+      if (player.hasNext) {
         _logger.info('[SKIP NEXT DEBUG] Player has next. Seeking to next in player.');
-        await _player.seekToNext();
-        await _player.play();
+        await player.seekToNext();
+        await player.play();
       } else {
         _logger.info('[SKIP NEXT DEBUG] Player is at the end of its current queue (_playlist length: $playerQueueLengthBeforeAdd).');
         
         MediaItem? lastPlayedPlayerItem;
-        final currentPlayingIndexInPlayer = _player.currentIndex;
+        final currentPlayingIndexInPlayer = player.currentIndex;
         if (currentPlayingIndexInPlayer != null && 
-            _player.sequenceState != null && 
-            currentPlayingIndexInPlayer < _player.sequenceState!.effectiveSequence.length) {
-          final lastPlayerAudioSource = _player.sequenceState!.effectiveSequence[currentPlayingIndexInPlayer];
+            player.sequenceState != null && 
+            currentPlayingIndexInPlayer < player.sequenceState!.effectiveSequence.length) {
+          final lastPlayerAudioSource = player.sequenceState!.effectiveSequence[currentPlayingIndexInPlayer];
           if (lastPlayerAudioSource.tag is MediaItem) {
             lastPlayedPlayerItem = lastPlayerAudioSource.tag as MediaItem;
             _logger.info('[SKIP NEXT DEBUG] Last played item in player: ${lastPlayedPlayerItem.title}');
@@ -471,8 +471,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
             if (playerQueueLengthBeforeAdd < _playlist.length) { 
               _logger.info('[SKIP NEXT DEBUG] Seeking to newly added song in player at index $playerQueueLengthBeforeAdd.');
-              await _player.seek(Duration.zero, index: playerQueueLengthBeforeAdd);
-              await _player.play();
+              await player.seek(Duration.zero, index: playerQueueLengthBeforeAdd);
+              await player.play();
             } else {
               _logger.warning('[SKIP NEXT DEBUG] _addNextSongsToPlaylist reported items processed, but _playlist.length did not increase as expected.');
             }
@@ -523,8 +523,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
         if (playerQueueLengthBeforeLoad < _playlist.length) {
             _logger.info('[SKIP NEXT DEBUG] (_tryLoadingMoreAndPlaying) Seeking to first of newly added batch (after loadMore) at index $playerQueueLengthBeforeLoad.');
-            await _player.seek(Duration.zero, index: playerQueueLengthBeforeLoad);
-            await _player.play();
+            await player.seek(Duration.zero, index: playerQueueLengthBeforeLoad);
+            await player.play();
         } else {
              _logger.warning('[SKIP NEXT DEBUG] (_tryLoadingMoreAndPlaying) Added songs, but new index $playerQueueLengthBeforeLoad is out of bounds or no effective change in _playlist.length ${_playlist.length}.');
         }
@@ -598,10 +598,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> skipToPrevious() async {
-    if (_player.position > const Duration(seconds: 3) && _player.currentIndex != null) {
-      await _player.seek(Duration.zero, index: _player.currentIndex);
-    } else if (_player.hasPrevious) {
-      await _player.seekToPrevious();
+    if (player.position > const Duration(seconds: 3) && player.currentIndex != null) {
+      await player.seek(Duration.zero, index: player.currentIndex);
+    } else if (player.hasPrevious) {
+      await player.seekToPrevious();
     }
   }
 
@@ -609,14 +609,14 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) async {
     switch (repeatMode) {
       case AudioServiceRepeatMode.none:
-        _player.setLoopMode(LoopMode.off);
+        player.setLoopMode(LoopMode.off);
         break;
       case AudioServiceRepeatMode.one:
-        _player.setLoopMode(LoopMode.one);
+        player.setLoopMode(LoopMode.one);
         break;
       case AudioServiceRepeatMode.group:
       case AudioServiceRepeatMode.all:
-        _player.setLoopMode(LoopMode.all);
+        player.setLoopMode(LoopMode.all);
         break;
     }
   }
@@ -624,24 +624,24 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   @override
   Future<void> setShuffleMode(AudioServiceShuffleMode shuffleMode) async {
     if (shuffleMode == AudioServiceShuffleMode.none) {
-      _player.setShuffleModeEnabled(false);
+      player.setShuffleModeEnabled(false);
     } else {
-      _player.setShuffleModeEnabled(true);
+      player.setShuffleModeEnabled(true);
     }
   }
 
   @override
   Future<void> customAction(String name, [Map<String, dynamic>? extras]) async {
     if (name == 'dispose') {
-      await _player.dispose();
+      await player.dispose();
       super.customAction(name, extras);
     }
   }
 
   @override
   Future<void> stop() async {
-    await _player.stop();
-    await _player.dispose();
+    await player.stop();
+    await player.dispose();
     await _nextSongsController.close();
     super.stop();
   }
@@ -682,7 +682,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
           print('[ERROR] clearAndPlay - Failed to resolve streaming URL for videoId: $url');
           throw Exception('Unable to get streaming URL for this song');
         }
-      }      await _player.stop();
+      }      await player.stop();
       await _playlist.clear();
       queue.add([]);
       
@@ -782,7 +782,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       
       queue.add(processedItems);
       
-      if (_player.playing) {
+      if (player.playing) {
         final currentVideoId = _extractYouTubeVideoId(queue.value.first.id);
         final newIndex = processedItems.indexWhere((item) {
           final videoId = _extractYouTubeVideoId(item.id);
@@ -791,7 +791,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         
         if (newIndex != -1) {
           _logger.info('Seeking to updated item in playlist at index $newIndex');
-          await _player.seek(Duration.zero, index: newIndex);
+          await player.seek(Duration.zero, index: newIndex);
         } else {
           _logger.warning('Current item not found in updated queue, may need to restart playback');
         }
@@ -863,10 +863,10 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   Future<void> playFromUpNext(int index) async {
-    final int currentPlayingIndex = _player.currentIndex ?? -1;
+    final int currentPlayingIndex = player.currentIndex ?? -1;
     if (currentPlayingIndex != -1 && index == currentPlayingIndex) {
       // If tapping the currently playing song, do nothing or maybe seek to 0.
-      await _player.seek(Duration.zero);
+      await player.seek(Duration.zero);
       return;
     }
 
